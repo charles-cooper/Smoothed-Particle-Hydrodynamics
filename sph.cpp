@@ -78,6 +78,10 @@ int gridCellCount;
 float * positionBuffer;
 float * velocityBuffer;
 
+//Delete This After Fixing
+float * neighborMapBuffer;
+unsigned int * particleIndexBuffer;
+
 cl::Context context;
 std::vector< cl::Device > devices;
 cl::CommandQueue queue;
@@ -88,7 +92,7 @@ cl::Buffer acceleration;
 cl::Buffer gridCellIndex;
 cl::Buffer gridCellIndexFixedUp;
 cl::Buffer neighborMap;
-cl::Buffer particleIndex;
+cl::Buffer particleIndex;// save list of [CellIndex, partivleIndex]
 cl::Buffer position;
 cl::Buffer pressure;
 cl::Buffer rho;
@@ -487,6 +491,40 @@ _runIndexPostPass( cl::CommandQueue queue ){
 #ifdef QUEUE_EACH_KERNEL
 	queue.finish();
 #endif
+	/*queue.finish();
+
+	unsigned int  * _gridCellIndex = new unsigned int[ ( gridCellCount + 1 ) ];
+	queue.enqueueReadBuffer( gridCellIndex, CL_TRUE, 0, ( ( gridCellCount + 1 ) * sizeof( unsigned int ) * 1 ), _gridCellIndex );
+	queue.finish();
+	FILE *f1 = fopen("boxes_p.txt","wt");
+	for(int id=0;id<( gridCellCount + 1 );id++) 
+	{
+		fprintf(f1,"%d\n",_gridCellIndex[id]);
+	}
+	fclose(f1);
+
+
+	unsigned int  * _gridCellIndexFixedUp = new unsigned int[ ( gridCellCount + 1 ) ];
+	queue.enqueueReadBuffer( gridCellIndexFixedUp, CL_TRUE, 0, ( ( gridCellCount + 1 ) * sizeof( unsigned int ) * 1 ), _gridCellIndexFixedUp );
+	queue.finish();
+	FILE *f = fopen("boxes_t.txt","wt");
+	for(int id=0;id<( gridCellCount + 1 );id++) 
+	{
+		fprintf(f,"%d\n",_gridCellIndexFixedUp[id]);
+	}
+	fclose(f);
+	*//*
+	unsigned int  * _particleIndex = new unsigned int[ PARTICLE_COUNT * 2 ];
+	queue.enqueueReadBuffer( particleIndex, CL_TRUE, 0, ( PARTICLE_COUNT * 2 * sizeof( unsigned int ) ), _particleIndex );
+	queue.finish();
+	FILE *f2 = fopen("particleIndex.txt","wt");
+	for(int id=0;id<( PARTICLE_COUNT * 2 );id+=2) 
+	{
+		fprintf(f2,"%d\t",_particleIndex[id]);
+		fprintf(f2,"%d\n",_particleIndex[id+1]);
+	}
+	fclose(f2);*/
+
 	return 0;
 }
 
@@ -799,9 +837,31 @@ void step()
 		throw std::runtime_error( "could not enqueue position read" );
 	}
 	queue.finish();
+
 	QueryPerformanceCounter(&t2);// stop timer
 	elapsedTime = (t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart;
 	printf("_readBuffer: \t\t\t%9.3f ms\n",elapsedTime);
+
+	//It should be removed after fixing
+	/**/err = queue.enqueueReadBuffer( neighborMap, CL_TRUE, 0, ( NK * sizeof( float ) * 2 ), neighborMapBuffer );
+	if( err != CL_SUCCESS ){
+		throw std::runtime_error( "could not enqueue neighborMap read" );
+	}
+	queue.finish();
+
+	QueryPerformanceCounter(&t2);// stop timer
+	elapsedTime = (t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart;
+	printf("_readBuffer: \t\t\t%9.3f ms\n",elapsedTime);/**/
+
+	/**/err = queue.enqueueReadBuffer( particleIndex, CL_TRUE, 0, ( PARTICLE_COUNT * sizeof( unsigned int ) * 2 ),  particleIndexBuffer);
+	if( err != CL_SUCCESS ){
+		throw std::runtime_error( "could not enqueue particleIndexBuffer read" );
+	}
+	queue.finish();
+
+	QueryPerformanceCounter(&t2);// stop timer
+	elapsedTime = (t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart;
+	printf("_readBuffer: \t\t\t%9.3f ms\n",elapsedTime);/**/
 
 
 	elapsedTime = (t2.QuadPart - t0.QuadPart) * 1000.0 / frequency.QuadPart;
@@ -913,8 +973,8 @@ void initializeOpenCL(
 
 	program = cl::Program( context, source );   
 //#ifdef NDEBUG
-/*work*///	err = program.build( devices, "-g -s \"D:\\MyProject\\OpenWorm\\SPH_OPENCL\\SPH_test4\\sphFluidDemo.cl\"" );
-/*home*///err = program.build( devices,"-g -s \"C:\\Users\\Sergey\\Desktop\\SPH_test4\\sphFluidDemo.cl\"" );
+/*work*///	err = program.build( devices, "-g -s \"E:\\Distrib\\_OpenWorm related soft\\SPH\\SphFluid_CLGL_original_highlight_neiborhood\\sphFluidDemo.cl\"" );
+/*home*/// err = program.build( devices,"-g -s \"C:\\Users\\Sergey\\Desktop\\SphFluid_CLGL_myNeighborhoodSearch_12may2012\\sphFluidDemo.cl\"" );
 /*#else*/
 	//err = program.build( devices, "-g" );
 	err = program.build( devices, "" );
@@ -936,6 +996,10 @@ int sph_fluid_main_start ( /*int argc, char **argv*/ )
 	positionBuffer = new float[ 4 * PARTICLE_COUNT ];
 	velocityBuffer = new float[ 4 * PARTICLE_COUNT ];
 
+
+
+	neighborMapBuffer = new float[( NK * sizeof( float ) * 2 )];
+	particleIndexBuffer = new unsigned int[PARTICLE_COUNT * 2];
 	//preInitDX10( PARTICLE_COUNT, positionBuffer );
 
 	try{

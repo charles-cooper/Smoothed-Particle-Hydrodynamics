@@ -10,6 +10,9 @@
 #include "sph.h"
 #include <stdio.h>
 #include <time.h>
+
+
+
 Engine *engine;
 bool rotate = false;
 int old_x=0, old_y=0;     // Used for mouse event
@@ -22,6 +25,8 @@ Vector3D ort1(1,0,0),ort2(0,1,0),ort3(0,0,1);
 //bool mouse_event = false; // need to reDraw
 //extern int particleCount;
 extern float * positionBuffer;
+extern float * neighborMapBuffer;
+extern unsigned int * particleIndexBuffer;
 
 int frames_counter = 0;
 
@@ -29,6 +34,7 @@ extern int sph_fluid_main_start ();
 extern void sph_fluid_main_step ();
 extern void sph_fluid_main_stop ();
 
+int pId = 1234;
  
 GLvoid display(GLvoid)
 {
@@ -142,11 +148,26 @@ GLvoid display(GLvoid)
 */
 
 	//glPopMatrix();	
+	
+	/*FILE *f2 = fopen("particleIndex.txt","wt");
+	for(int id=0;id<( PARTICLE_COUNT * 2 );id++) 
+	{
+		fprintf(f2,"%d\n",particleIndexBuffer[id]);
+		//fprintf(f2,"%d\n",particleIndexBuffer[id+1]);
+	}
+	fclose(f2);*/
 
 	glColor3ub(75, 135, 195);
-
+	
+	for(int i=0;i<PARTICLE_COUNT;i++){
+		if(pId == particleIndexBuffer[2*i + 1]){
+			pId = i;
+			break;
+		}
+	}
 	Vector3D v;
-
+	
+	
 	//int x = positionBuffer[0];
 	//float distrib[301];
 	//for(int j=0;j<301;j++) distrib[j] = 0;
@@ -155,7 +176,7 @@ GLvoid display(GLvoid)
 	glColor3f(1.0,1.0,1.0);
 	glPointSize(1.f);
 	//glEnable(GL_POINT_SMOOTH);
-	for(int i = 0; i<PARTICLE_COUNT; i ++)
+	for(int i = 0; i<PARTICLE_COUNT; i++)
 	{
 		//GLfloat vert[] = {0.f,0.f,0.f};
 		glPushMatrix();
@@ -169,9 +190,57 @@ GLvoid display(GLvoid)
 		glPopMatrix();
 	}
 	glEnd();
+
+
+	//
+	/**///glBegin(GL_POINTS);
+	
+	glPointSize(1.f);
+
+	glColor3f(1.0,0.0,0.0);
+
+	float x,y,z;
+	/**/
+	for(int id = 0; id<NEIGHBOR_COUNT*2; id+=2)
+	{
+		int i = (int)neighborMapBuffer[pId * NEIGHBOR_COUNT * 2 + id];
+
+		if(i >=0 )
+		{
+			glPushMatrix();
+			//GLfloat vert[] = {0.f,0.f,0.f};
+			//glVertex3fv(vert);
+			x = (positionBuffer[i*4]-XMAX/2)*sc;
+			y = (positionBuffer[i*4+1]-XMAX/2)*sc;
+			z = (positionBuffer[i*4+2]-XMAX/2)*sc;
+			glTranslated( (positionBuffer[i*4]-XMAX/2)*sc , (positionBuffer[i*4+1]-YMAX/2)*sc, (positionBuffer[i*4+2]-ZMAX/2)*sc );
+			
+			
+			glutSolidSphere( 0.2*sc, 4, 2 );
+
+			//glVertex3f((positionBuffer[i*4]-XMAX/2)*sc , (positionBuffer[i*4+1]-YMAX/2)*sc, (positionBuffer[i*4+2]-ZMAX/2)*sc );
+			glPopMatrix();
+		}
+	}/**/
+	//glEnd();
+
+
+	glColor3f(0.0,0.0,0.0);
+    int i = pId;
+	glPushMatrix();
+	glTranslated( (positionBuffer[i*4]-XMAX/2)*sc , (positionBuffer[i*4+1]-YMAX/2)*sc, (positionBuffer[i*4+2]-ZMAX/2)*sc );
+	glutSolidSphere( 0.2*sc, 4, 2 );
+	glPopMatrix();
+
+
+     glEnd();
+	//
+
+	
+
 	//glPopMatrix();
 	//printf("\ntime:%d",clock()-c);
-	c = clock();
+	//c = clock();
 	/*FILE *f = fopen("distrib.txt","wt");
 	for(int j=0;j<301;j++) fprintf(f,"%.3f\n",distrib[j]);
 	fclose(f);*/
