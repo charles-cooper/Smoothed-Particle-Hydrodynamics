@@ -973,7 +973,7 @@ void initializeOpenCL(
 
 	program = cl::Program( context, source );   
 //#ifdef NDEBUG
-/*work*///	err = program.build( devices, "-g -s \"E:\\Distrib\\_OpenWorm related soft\\SPH\\SphFluid_CLGL_original_highlight_neiborhood\\sphFluidDemo.cl\"" );
+/*work*///	err = program.build( devices, "-g -s \"D:\\MyProject\\OpenWorm\\SPH_OPENCL\\SPH_OLD_KernelS\\sphFluidDemo.cl\"" );
 /*home*/// err = program.build( devices,"-g -s \"C:\\Users\\Sergey\\Desktop\\SphFluid_CLGL_myNeighborhoodSearch_12may2012\\sphFluidDemo.cl\"" );
 /*#else*/
 	//err = program.build( devices, "-g" );

@@ -5,9 +5,9 @@
 // "Particle-based fluid simulation for interactive applications", Muller, Charypar & Gross,
 // Eurographics/SIGGRAPH Symposium on Computer Animation (2003).
 
-#include "sph.h"
-//#define PARTICLE_COUNT ( 32 * 1024 )//( 32 * 1024 )
-//#define NEIGHBOR_COUNT 32
+
+#define PARTICLE_COUNT ( 32 * 1024 )//( 32 * 1024 )
+#define NEIGHBOR_COUNT 32
 
 #define NO_PARTICLE_ID -1
 #define NO_CELL_ID -1
@@ -405,7 +405,7 @@ uint myRandom(
 
 
 #define radius_segments 30
-
+#define TEMPORARY_NEIGHBOR_COUNT 500
 
 int searchForNeighbors( 
 					   int searchCell_, 
@@ -419,31 +419,35 @@ int searchForNeighbors(
 					   float simulationScale,
 					   int mode,
 					   int * radius_distrib,
-					   float r_thr
+					   float r_thr,
+					   /*__global*/ int * temporaryNeighbor,
+					   int currentPoss
 					   )
 {
 	int baseParticleId = gridCellIndex[ searchCell_ ];
 	int nextParticleId = gridCellIndex[ searchCell_ + 1 ];
-	int particleCountThisCell = nextParticleId - baseParticleId;
+	int particleCountThisCell = (mode == 0) ? (nextParticleId - baseParticleId) : currentPoss;
 	int potentialNeighbors = particleCountThisCell;
 	int foundCount = 0;
 	bool loop = true;
+	int poss = currentPoss;
 	int i = 0,j;
 	float distance,distanceSquared;
 	float r_thr_Squared = r_thr*r_thr;
 	float2 neighbor_data;
 	int neighborParticleId;
+	float4 d;
 	int myOffset;
-	if(spaceLeft>0)
+	//if(spaceLeft>0)
 		while( i < particleCountThisCell ){
 
-			neighborParticleId = baseParticleId + i;
+			neighborParticleId = (mode == 0) ? (baseParticleId + i):temporaryNeighbor[i];
 			
-			//if(myParticleId == neighborParticleId) continue;
-
 			if(myParticleId != neighborParticleId)
 			{
-				float4 d = position_ - sortedPosition[ neighborParticleId ];
+				/*if(neighborParticleId == -1)
+					break;*/
+				d = position_ - sortedPosition[ neighborParticleId ];
 				d.w = 0.0f;
 				distanceSquared = DOT( d, d );
 				if( distanceSquared <= r_thr_Squared )
@@ -452,23 +456,25 @@ int searchForNeighbors(
 					j = (int)(distance*radius_segments/h);
 					if(j<radius_segments) 
 						radius_distrib[j]++;
+					if(mode == 0 && poss <= TEMPORARY_NEIGHBOR_COUNT ){
+						temporaryNeighbor[poss] = neighborParticleId;
+						poss++;
+					}
 					if(mode)
 					{
+						distance = distance * simulationScale;
 						myOffset = NEIGHBOR_COUNT - spaceLeft + foundCount;
 						neighbor_data.x = neighborParticleId;
-						neighbor_data.y = distance* simulationScale;
+						neighbor_data.y = distance;
 						neighborMap[ myParticleId*NEIGHBOR_COUNT + myOffset ] = neighbor_data;
 						foundCount++;
 					}
 				}
-			
 			}
-
 			i++;
-			
 		}//while
 
-	return foundCount;
+	return (mode == 0)? poss : foundCount;
 }
 
 
@@ -518,25 +524,32 @@ __kernel void findNeighbors(
 	int mode = 0;
 	int distrib_sum = 0;
 	int radius_distrib[radius_segments];
+	/*__global*/ int temporaryNeighbor[TEMPORARY_NEIGHBOR_COUNT];
 	int i=0,j;
 	float r_thr = h;
-	
+	int currentPoss = 0;
 	while( i<radius_segments )
 	{
 		radius_distrib[i]=0;
 		i++;
 	}
-	
+	i = 0;
+	while( i<TEMPORARY_NEIGHBOR_COUNT )
+	{
+		temporaryNeighbor[i]=-1;
+		i++;
+	}
 	while( mode<2 )
 	{
 
-	
 		searchCell_ = myCellId;
 		foundCount += searchForNeighbors( searchCell_, gridCellIndex, position_, 
 			id, sortedPosition, neighborMap, NEIGHBOR_COUNT - foundCount, 
-			h, simulationScale, mode, &radius_distrib, r_thr );
-
-
+			h, simulationScale, mode, &radius_distrib, r_thr, &temporaryNeighbor, currentPoss );
+		if(mode == 1) 
+			return;
+		currentPoss = foundCount;
+		foundCount = 0;
 		// p is the current particle position within the bounds of the hash grid
 		float4 p;
 		float4 p0 = (float4)( xmin, ymin, zmin, 0.0f );//я так понимаю xmin, ymin, zmin -> нули -> наверное стоит убрать это тогда
@@ -558,48 +571,49 @@ __kernel void findNeighbors(
 		delta = one + 2 * lo;
 
 		// search up to 8 surrounding cells
-		
-	
 		searchCell_ = searchCell( myCellId, delta.x, 0, 0, gridCellsX, gridCellsY, gridCellsZ, gridCellCount );
 		foundCount += searchForNeighbors( searchCell_, gridCellIndex, position_, 
 			id, sortedPosition, neighborMap, NEIGHBOR_COUNT - foundCount, 
-			h, simulationScale, mode, &radius_distrib, r_thr  );
-
+			h, simulationScale, mode, &radius_distrib, r_thr, &temporaryNeighbor, currentPoss  );
+		currentPoss = foundCount;
+		foundCount =(mode == 0)? 0:foundCount;
 		searchCell_ = searchCell( myCellId, 0, delta.y, 0, gridCellsX, gridCellsY, gridCellsZ, gridCellCount );
 		foundCount += searchForNeighbors( searchCell_, gridCellIndex, position_, 
 			id, sortedPosition, neighborMap, NEIGHBOR_COUNT - foundCount, 
-			h, simulationScale, mode, &radius_distrib, r_thr  );
-
+			h, simulationScale, mode, &radius_distrib, r_thr, &temporaryNeighbor, currentPoss  );
+		currentPoss = foundCount;
+		foundCount = 0;
 		searchCell_ = searchCell( myCellId, 0, 0, delta.z, gridCellsX, gridCellsY, gridCellsZ, gridCellCount );
 		foundCount += searchForNeighbors( searchCell_, gridCellIndex, position_, 
 			id, sortedPosition, neighborMap, NEIGHBOR_COUNT - foundCount, 
-			h, simulationScale, mode, &radius_distrib, r_thr  );
-
+			h, simulationScale, mode, &radius_distrib, r_thr, &temporaryNeighbor, currentPoss  );
+		currentPoss = foundCount;
+		foundCount =(mode == 0)? 0:foundCount;
 		searchCell_ = searchCell( myCellId, delta.x, delta.y, 0, gridCellsX, gridCellsY, gridCellsZ, gridCellCount );
 		foundCount += searchForNeighbors( searchCell_, gridCellIndex, position_, 
 			id, sortedPosition, neighborMap, NEIGHBOR_COUNT - foundCount, 
-			h, simulationScale, mode, &radius_distrib, r_thr  );
-
+			h, simulationScale, mode, &radius_distrib, r_thr, &temporaryNeighbor, currentPoss  );
+		currentPoss = foundCount;
+		foundCount =(mode == 0)? 0:foundCount;
 		searchCell_ = searchCell( myCellId, delta.x, 0, delta.z, gridCellsX, gridCellsY, gridCellsZ, gridCellCount );
 		foundCount += searchForNeighbors( searchCell_, gridCellIndex, position_, 
 			id, sortedPosition, neighborMap, NEIGHBOR_COUNT - foundCount, 
-			h, simulationScale, mode, &radius_distrib, r_thr  );
-
+			h, simulationScale, mode, &radius_distrib, r_thr, &temporaryNeighbor, currentPoss  );
+		currentPoss = foundCount;
 		searchCell_ = searchCell( myCellId, 0, delta.y, delta.z, gridCellsX, gridCellsY, gridCellsZ, gridCellCount );
-		foundCount += searchForNeighbors( searchCell_, gridCellIndex, position_, 
+		foundCount = searchForNeighbors( searchCell_, gridCellIndex, position_, 
 			id, sortedPosition, neighborMap, NEIGHBOR_COUNT - foundCount, 
-			h, simulationScale, mode, &radius_distrib, r_thr  );
-
+			h, simulationScale, mode, &radius_distrib, r_thr, &temporaryNeighbor, currentPoss  );
+		currentPoss = foundCount;
 		searchCell_ = searchCell( myCellId, delta.x, delta.y, delta.z, gridCellsX, gridCellsY, gridCellsZ, gridCellCount );
-		foundCount += searchForNeighbors( searchCell_, gridCellIndex, position_, 
+		foundCount = searchForNeighbors( searchCell_, gridCellIndex, position_, 
 			id, sortedPosition, neighborMap, NEIGHBOR_COUNT - foundCount, 
-			h, simulationScale, mode, &radius_distrib, r_thr );
-
+			h, simulationScale, mode, &radius_distrib, r_thr, &temporaryNeighbor, currentPoss );
+		currentPoss = foundCount;
+		foundCount = 0;
 		if(mode==0)
 		{
 			j=0;
-
-			
 			while(j<radius_segments)
 			{
 				distrib_sum += radius_distrib[j];
@@ -607,11 +621,8 @@ __kernel void findNeighbors(
 				if(distrib_sum> 32) { j--; break; }
 				j++;
 			}
-
 			r_thr = (j+1)*h/radius_segments;
-
 		}
-
 		mode++;
 	}
 

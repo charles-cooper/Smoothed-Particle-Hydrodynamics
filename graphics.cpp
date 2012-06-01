@@ -193,47 +193,44 @@ GLvoid display(GLvoid)
 
 
 	//
-	/**///glBegin(GL_POINTS);
-	
-	glPointSize(1.f);
-
-	glColor3f(1.0,0.0,0.0);
-
-	float x,y,z;
 	/**/
+	//FILE *f2 = fopen("particleNeigborArray.txt","wt");
+	
+	//glBegin(GL_POINTS);
+	glColor3f(1.0,0.0,0.0);
 	for(int id = 0; id<NEIGHBOR_COUNT*2; id+=2)
 	{
 		int i = (int)neighborMapBuffer[pId * NEIGHBOR_COUNT * 2 + id];
-
-		if(i >=0 )
+		if(i >= 0)
 		{
 			glPushMatrix();
-			//GLfloat vert[] = {0.f,0.f,0.f};
-			//glVertex3fv(vert);
-			x = (positionBuffer[i*4]-XMAX/2)*sc;
-			y = (positionBuffer[i*4+1]-XMAX/2)*sc;
-			z = (positionBuffer[i*4+2]-XMAX/2)*sc;
 			glTranslated( (positionBuffer[i*4]-XMAX/2)*sc , (positionBuffer[i*4+1]-YMAX/2)*sc, (positionBuffer[i*4+2]-ZMAX/2)*sc );
-			
-			
-			glutSolidSphere( 0.2*sc, 4, 2 );
-
-			//glVertex3f((positionBuffer[i*4]-XMAX/2)*sc , (positionBuffer[i*4+1]-YMAX/2)*sc, (positionBuffer[i*4+2]-ZMAX/2)*sc );
+			glutSolidSphere( 0.3*sc, 4, 2 );
+			/*fprintf(f2,"%d\t",i);
+			fprintf(f2,"%f\t",(positionBuffer[i*4]));
+			fprintf(f2,"%f\t",(positionBuffer[i*4+1]));
+			fprintf(f2,"%f\n",(positionBuffer[i*4+2]));*/
 			glPopMatrix();
+			//break;
 		}
 	}/**/
+	
 	//glEnd();
-
-
+	//glBegin(GL_POINTS);
+	glPointSize(1.f);
 	glColor3f(0.0,0.0,0.0);
     int i = pId;
 	glPushMatrix();
+	/*fprintf(f2,"%d\t",i);
+	fprintf(f2,"%f\t",(positionBuffer[i*4]));
+	fprintf(f2,"%f\t",(positionBuffer[i*4+1]));
+	fprintf(f2,"%f",(positionBuffer[i*4+2]));*/
 	glTranslated( (positionBuffer[i*4]-XMAX/2)*sc , (positionBuffer[i*4+1]-YMAX/2)*sc, (positionBuffer[i*4+2]-ZMAX/2)*sc );
 	glutSolidSphere( 0.2*sc, 4, 2 );
 	glPopMatrix();
 
-
-     glEnd();
+	//fclose(f2);
+    //glEnd();
 	//
 
 	
