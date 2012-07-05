@@ -67,6 +67,12 @@ const float gravity_x = 0.0f;
 const float gravity_y = -9.8f;
 const float gravity_z = 0.0f;
 
+const float young_module = 0.05;//http://en.wikipedia.org/wiki/Young_modulus for rubber
+const float poisson_ratio = 0.50;//http://en.wikipedia.org/wiki/Poisson%27s_ratio for rubber
+
+const float shapedCoeefficient = M_PI/(8*h*h*h*h*(M_PI/3 - 8/M_PI + 16/(M_PI*M_PI))) * (2*h)/M_PI;// p. 66 [Sol]
+const float gradShapedCoeefficient = M_PI/(8*h*h*h*h*(M_PI/3 - 8/M_PI + 16/(M_PI*M_PI)));
+
 //int particleCount = PARTICLE_COUNT;//AP2012
 
 int gridCellsX;
@@ -112,6 +118,9 @@ cl::Kernel indexx;
 cl::Kernel integrate;
 cl::Kernel sortPostPass;
 
+
+cl::Buffer volume;
+cl::Buffer displacement;
 /*//AP2012
 #ifdef NDEBUG
 amd::RadixSortCL radixSort;
@@ -931,7 +940,7 @@ void initializeOpenCL(
 */
 
 	//0-CPU, 1-GPU// depends on order appropriet drivers was instaled
-	int plList=1;//selected platform index in platformList array
+	int plList=0;//selected platform index in platformList array
 
 	cl_context_properties cprops[3] = { CL_CONTEXT_PLATFORM, (cl_context_properties) (platformList[plList])(), 0 };
 
@@ -1067,7 +1076,16 @@ int sph_fluid_main_start ( /*int argc, char **argv*/ )
 		if( err != CL_SUCCESS ){
 			throw std::runtime_error( "buffer velocity creation failed" );
 		}
-
+		//ELASTIC MATERIAL BUFFERS
+		volume = cl::Buffer( context, CL_MEM_READ_WRITE, ( ELASTIC_PARTICLE_COUNT * sizeof( float ) * 2 ), NULL, &err );
+		if( err != CL_SUCCESS ){
+			throw std::runtime_error( "buffer volume creation failed" );
+		}
+		displacement = cl::Buffer( context, CL_MEM_READ_WRITE, ( ELASTIC_PARTICLE_COUNT * sizeof( float ) * 4 ), NULL, &err );
+		if( err != CL_SUCCESS ){
+			throw std::runtime_error( "buffer volume creation failed" );
+		}
+	
 		// create kernels
 		clearBuffers = cl::Kernel( program, "clearBuffers", &err );
 		if( err != CL_SUCCESS ){
