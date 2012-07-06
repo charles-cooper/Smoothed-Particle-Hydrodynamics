@@ -1124,8 +1124,8 @@ int sph_fluid_main_start ( /*int argc, char **argv*/ )
 			throw std::runtime_error( "kernel sortPostPass creation failed" );
 		}
 
-
-		for( int i = 0; i < PARTICLE_COUNT; ++i ){
+		int i = 0;
+		for( i = 0; i < LIQUID_PARTICLE_COUNT; ++i ){
 			float x, y, z;
 			float r;
 			r = ( (float)rand() / (float)RAND_MAX );
@@ -1148,7 +1148,34 @@ int sph_fluid_main_start ( /*int argc, char **argv*/ )
 			r = ( (float)rand() / (float)RAND_MAX );
 			velocityVector[ 2 ] = SCALE( -1.0f, 1.0f, r );
 			velocityVector[ 3 ] = 0;
+			
 		}//for
+		
+		//Creation of Elastic body
+		int p = 0;
+		for( int t = 0; (t < 16)&&(p<ELASTIC_PARTICLE_COUNT); t++ )
+			for( int j = 0; (j < 16)&&(p<ELASTIC_PARTICLE_COUNT); j++ )
+				for( int k = 0; (k < 64)&&(p<ELASTIC_PARTICLE_COUNT); k++ )
+				{
+					float x, y, z;
+					float bodyIndex = 0;
+					float r = 0.4f;//2.47;
+					x = r * t;
+					y = r * j;
+					z = r * k;
+					float * positionVector = positionBuffer + 4 * i;
+					positionVector[ 0 ] = x;
+					positionVector[ 1 ] = y;
+					positionVector[ 2 ] = z;
+					positionVector[ 3 ] = 0;
+					float * velocityVector = velocityBuffer + 4 * i;
+					velocityVector[ 0 ] = 0;
+					velocityVector[ 1 ] = 0;
+					velocityVector[ 2 ] = 0;
+					velocityVector[ 3 ] = 0;
+					p++;
+					i++;
+				}
 
 		err = queue.enqueueWriteBuffer( position, CL_TRUE, 0, PARTICLE_COUNT * sizeof( float ) * 4, positionBuffer );
 		if( err != CL_SUCCESS ){
