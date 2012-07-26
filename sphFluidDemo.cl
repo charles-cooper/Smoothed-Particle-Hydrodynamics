@@ -39,31 +39,39 @@
 //#pragma OPENCL EXTENSION cl_amd_printf : enable
 
 __kernel void clearBuffers(
-						   __global float2 * neighborMap
+						   __global float2 * neighborMap,
+						   __global int * elasticNeighbourCount
 						   )
 {
 	int id = get_global_id( 0 );
 	__global float4 * nm = (__global float4 *)neighborMap;
 	int outIdx = ( id * NEIGHBOR_COUNT ) >> 1;//int4 versus int2 addressing
 	float4 fdata = (float4)( -1, -1, -1, -1 );
-
-	nm[ outIdx++ ] = fdata;
-	nm[ outIdx++ ] = fdata;
-	nm[ outIdx++ ] = fdata;
-	nm[ outIdx++ ] = fdata;
-	nm[ outIdx++ ] = fdata;
-	nm[ outIdx++ ] = fdata;
-	nm[ outIdx++ ] = fdata;
-	nm[ outIdx++ ] = fdata;
-	nm[ outIdx++ ] = fdata;
-	nm[ outIdx++ ] = fdata;
-	nm[ outIdx++ ] = fdata;
-	nm[ outIdx++ ] = fdata;
-	nm[ outIdx++ ] = fdata;
-	nm[ outIdx++ ] = fdata;
-	nm[ outIdx++ ] = fdata;
-	nm[ outIdx++ ] = fdata;
-
+	if(id < LIQUID_PARTICLE_COUNT){
+		nm[ outIdx++ ] = fdata;
+		nm[ outIdx++ ] = fdata;
+		nm[ outIdx++ ] = fdata;
+		nm[ outIdx++ ] = fdata;
+		nm[ outIdx++ ] = fdata;
+		nm[ outIdx++ ] = fdata;
+		nm[ outIdx++ ] = fdata;
+		nm[ outIdx++ ] = fdata;
+		nm[ outIdx++ ] = fdata;
+		nm[ outIdx++ ] = fdata;
+		nm[ outIdx++ ] = fdata;
+		nm[ outIdx++ ] = fdata;
+		nm[ outIdx++ ] = fdata;
+		nm[ outIdx++ ] = fdata;
+		nm[ outIdx++ ] = fdata;
+		nm[ outIdx++ ] = fdata;
+	}
+	else{
+		int i = elasticNeighbourCount[id - LIQUID_PARTICLE_COUNT];
+		while( i > NEIGHBOR_COUNT){
+			nm[ i ] = fdata;
+			i++;
+		}
+	}
 }
 
 
@@ -243,6 +251,13 @@ float Wpoly6(
 	return result;
 }
 
+float Wshape(float r,
+			 float h,
+			 float shapedCoeefficient){
+	float x = (r+h)*M_PI/(2*h);
+	float result = shapedCoeefficient * (cos(x) + 1);
+	return result;
+}
 
 
 float densityContribution(
@@ -471,6 +486,104 @@ int searchForNeighbors(
 	return foundCount;
 }
 
+int searchNeighborForElasticParticle(int particleId, 
+									 __global float8 * position,
+									 __global float2 * neighborMap,
+								     float h,
+								     float simulationScale,
+								     int mode,
+								     int * radius_distrib,
+								     float r_thr,int objectId){
+	int particleCountThisCell = ELASTIC_PARTICLE_COUNT;
+	int potentialNeighbors = particleCountThisCell;
+	int foundCount = 0;
+	float4 position_ = position[ particleId ].lo;
+	bool loop = true;
+	int i = 0,j;
+	float distance,distanceSquared;
+	float r_thr_Squared = r_thr*r_thr;
+	float2 neighbor_data;
+	int neighborParticleId;
+	int myOffset;
+	while( i < particleCountThisCell ){
+
+		neighborParticleId = LIQUID_PARTICLE_COUNT + i;
+		
+		//if(myParticleId == neighborParticleId) continue;
+
+		if(particleId != neighborParticleId && position[ neighborParticleId ].s4 == objectId)
+		{
+			float4 d = position_ - position[ neighborParticleId ].lo;
+			d.w = 0.0f;
+			distanceSquared = DOT( d, d );
+			if( distanceSquared <= r_thr_Squared )
+			{
+				distance = SQRT( distanceSquared );
+				j = (int)(distance*radius_segments/h);
+				if(j<radius_segments) 
+					radius_distrib[j]++;
+				if(mode)
+				{
+					myOffset = foundCount;
+					neighbor_data.x = neighborParticleId;
+					neighbor_data.y = distance* simulationScale;
+					neighborMap[ particleId*NEIGHBOR_COUNT + myOffset ] = neighbor_data;
+					foundCount++;
+				}
+			}
+		
+		}
+
+		i++;
+		
+	}//while
+
+	return foundCount;
+}
+__kernel void findNeighborFotElasticParticle(__global float8 * position,
+											 float h,
+											 __global float2 * neighborMap,
+											  float simulationScale,
+											 __global int * elasticNeighbourCount )
+{
+	int posId = get_global_id(0);
+	int id = posId + LIQUID_PARTICLE_COUNT;
+	int objectId = (int)position[id].s4;
+	float distance = 0;	
+	int i = 0,j;
+	int foundCount = 0;
+	int mode = 0;
+	int distrib_sum = 0;
+	int radius_distrib[radius_segments];
+	float r_thr = h;
+	while( i<radius_segments )
+	{
+		radius_distrib[i]=0;
+		i++;
+	}
+	while( mode<2 )
+	{
+		foundCount = searchNeighborForElasticParticle(id,position,neighborMap,h,simulationScale,mode,&radius_distrib,r_thr, objectId);
+		if(mode==0)
+		{
+			j=0;
+
+			while(j<radius_segments)
+			{
+				distrib_sum += radius_distrib[j];
+				if(distrib_sum==32) break;
+				if(distrib_sum> 32) { j--; break; }
+				j++;
+			}
+
+			r_thr = (j+1)*h/radius_segments;
+
+		}
+
+		mode++;
+	}
+	elasticNeighbourCount[posId] = foundCount;
+}
 
 int4 cellFactors( 
 				 float4 position,
@@ -506,7 +619,9 @@ __kernel void findNeighbors(
 							float xmin,
 							float ymin,
 							float zmin,
-							__global float2 * neighborMap
+							__global float2 * neighborMap,
+							__global float8 * position,
+							__global int * elasticNeighbourCount
 							)
 {
 	__global uint * gridCellIndex = gridCellIndexFixedUp;
@@ -520,7 +635,13 @@ __kernel void findNeighbors(
 	int radius_distrib[radius_segments];
 	int i=0,j;
 	float r_thr = h;
-	
+	bool is_elastic= false;
+	if(id>=LIQUID_PARTICLE_COUNT){
+		if(elasticNeighbourCount[id]>=NEIGHBOR_COUNT)
+			return;
+		is_elastic = true;
+		foundCount = elasticNeighbourCount[id];
+	}	
 	while( i<radius_segments )
 	{
 		radius_distrib[i]=0;
@@ -529,8 +650,6 @@ __kernel void findNeighbors(
 	
 	while( mode<2 )
 	{
-
-	
 		searchCell_ = myCellId;
 		foundCount += searchForNeighbors( searchCell_, gridCellIndex, position_, 
 			id, sortedPosition, neighborMap, NEIGHBOR_COUNT - foundCount, 
@@ -631,7 +750,7 @@ int cellId(
 
 
 __kernel void hashParticles(
-							__global float4 * position,
+							__global float8 * position,
 							int gridCellsX,
 							int gridCellsY,
 							int gridCellsZ,
@@ -652,7 +771,7 @@ __kernel void hashParticles(
 		return;
 	}
 
-	float4 _position = position[ id ];
+	float4 _position = position[ id ].lo;
 	int4 cellFactors_ = cellFactors( _position, xmin, ymin, zmin, hashGridCellSizeInv ); 
 	//int cellId_ = cellId( cellFactors_, gridCellsX, gridCellsY, gridCellsZ );
 	int cellId_ = cellId( cellFactors_, gridCellsX, gridCellsY, gridCellsZ ) & 0xffff; // truncate to low 16 bits
@@ -829,8 +948,191 @@ void handleBoundaryConditions(
 	}
 
 }
+__kernel void calculateVolume(__global float8 * position,
+							  __global float * volume,
+							  __global float2 * neighborMap,
+							  float mass, 
+							  float shapedCoeefficient,
+							  float h
+							  )
+{
+	int id = get_global_id(0);
+	int i = 0;
+	float density = 0;
+	float result;
+	while(i < NEIGHBOR_COUNT && NEIGHBOR_MAP_ID(neighborMap[i]) != -1){
+		density += mass * Wshape(NEIGHBOR_MAP_DISTANCE(neighborMap[i]),h,shapedCoeefficient); 
+		i++;
+	}
+	if(density != 0){
+		result = mass / density;
+	}
+	volume[id] = result;
+}
+float4 WshapeGrad(float r,
+				 float h,
+				 float gradShapedCoeefficient,
+				 float4 position_i,
+				 float4 position_j,
+				 float simulationScale
+				 ){
+	float4 rVec = position_i - position_j;
+	float4 scaledVec = rVec * simulationScale;
+	rVec.w = 0.0f;
+	float x = (r + h)*M_PI/(2*h);
+	float4 result = gradShapedCoeefficient * (-sin(x)) * scaledVec;
+	return result;
+}
+void calculateStrainTensor( float4 gradDisplacement,
+							float poison_ratio,
+							float young_module
+							)
+{
+	float4 nullVec = (float4)(0.f,0.f,0.f,0.f);
+	//float4 stressMatrix = (float4)(nullVec, nullVec, nullVec, NullVec);
+	
+}
 
 
+/*WORK WITH MATRIX*/
+float4 multRowOnColumn(float4 row, float4 column1, float4 column2,float4 column3){
+	float4 result= (float4)(0.f,0.f,0.f,0.f);
+	result.x = dot(row , column1);
+	result.y = dot(row , column2);
+	result.z = dot(row , column3);
+	return result;
+}
+
+void calcStressJacobianMult(float4 * u,
+							float4 * v,
+							float4 * w, 
+							float poison_ratio, 
+							float young_module,
+							float4 * row1,
+							float4 * row2,
+							float4 * row3){
+	float e_xx, e_yy, e_zz, e_xy, e_yz, e_zx;
+	float s_xx, s_yy, s_zz, s_xy, s_yz, s_zx;
+	float ratio = young_module / ((1+poison_ratio)*(1-2*poison_ratio));
+	float4 result;
+	//Strain Tensor
+	e_xx = 2 * u->x + u->x * u->x + v->x * v->x + w->x * w->x;
+	e_yy = 2 * v->y + u->y * u->y + v->y * v->y + w->y * w->y;
+	e_zz = 2 * w->z + u->z * u->z + v->z * v->z + w->z * w->z;
+	e_xy = u->y + v->x + u->x *u->y + v->x * v->y + w->z * w->y;
+	e_yz = v->z + w->y + u->y * u->z + v->y * v->z + w->y * w->z;
+	e_zx = w->y + u->z + u->z * u->x + v->z * v->x + w->z * w->x;
+	//STRESS TENSOR
+	s_xx = ratio * ( (1-poison_ratio) * e_xx + poison_ratio * e_yy + poison_ratio * e_zz);
+	s_yy = ratio * ( poison_ratio * e_xx + (1-poison_ratio) * e_yy + poison_ratio * e_zz);
+	s_zz = ratio * ( poison_ratio * e_xx + poison_ratio * e_yy + (1 - poison_ratio) * e_zz);
+	s_xy = ratio * ( e_xy * ( 1 - 2 * poison_ratio ) );
+	s_yz = ratio * ( e_yz * ( 1 - 2 * poison_ratio ) );
+	s_zx = ratio * ( e_zx * ( 1 - 2 * poison_ratio ) );
+	//This is Jacobian J = I + dU^T u v and w is rows of transposition gradientU
+	u->x += 1.f;
+	v->y += 1.f;
+	w->z += 1.f;
+	//F = -2Vj *J *s *dij
+	//First ROW
+	row1->x = u->x * s_xx + u->y * s_xy + u->z * s_zx;
+	row1->y = u->x * s_xy + u->y * s_yy + u->z * s_yz;
+	row1->z = u->x * s_zx + u->y * s_yz + u->z * s_zz;
+	row1->w = 0;
+	//Second Row
+	row2->x = v->x * s_xx + v->y * s_xy + v->z * s_zx;
+	row2->y = v->x * s_xy + v->y * s_yy + v->z * s_yz;
+	row2->z = v->x * s_zx + v->y * s_yz + v->z * s_zz;
+	row2->w = 0;
+	//3th Row
+	row3->x = w->x * s_xx + w->y * s_xy + w->z * s_zx;
+	row3->y = w->x * s_xy + w->y * s_yy + w->z * s_yz;
+	row3->z = w->x * s_zx + w->y * s_yz + w->z * s_zz;
+	row3->w = 0;
+
+	//
+	
+}
+
+__kernel void calculateElasticForces(__global float8 * position,
+									 __global float * volume,
+									 __global float4 * displacement,
+									 float shapedCoeefficient,
+									 float gradShapedCoeefficient,
+									 float h,
+									 float simulationScale,
+									 float poison_ratio,
+									 float young_module,
+									 __global float2 * neighborMap)
+{
+	int id = get_global_id(0);
+	int particleId = id + LIQUID_PARTICLE_COUNT;
+	float4 d_ij;
+	int j = 0;
+	float4 u_ji;
+	float4 nullVec = (float4)(0.f,0.f,0.f,0.f);
+	int neighborId;
+	float neighborDistance;
+	float4 gradVec;
+	float4 gradDisplacement1 = nullVec;
+	float4 gradDisplacement2 = nullVec;
+	float4 gradDisplacement3 = nullVec;
+	float4 rowVec = nullVec;
+	float4 column1 = nullVec;
+	float4 column2 = nullVec;
+	float4 column3 = nullVec;
+	float4 u;
+	float4 v;
+	float4 w;
+	float4 row1;
+	float4 row2;
+	float4 row3;
+	float4 force;
+	//float4 jacobianMatrix = (float4)(nullVec, nullVec, nullVec, nullVec);
+	//float4 strainMatrix = (float4)(nullVec, nullVec, nullVec, nullVec);
+	while(j < NEIGHBOR_COUNT && NEIGHBOR_MAP_ID(neighborMap[NEIGHBOR_COUNT * particleId + j]) != -1){
+		neighborId = NEIGHBOR_MAP_ID(neighborMap[NEIGHBOR_COUNT * particleId + j]);
+		if(neighborId >= LIQUID_PARTICLE_COUNT){
+			neighborDistance = NEIGHBOR_MAP_DISTANCE(neighborMap[NEIGHBOR_COUNT * particleId + j]);
+			gradVec = WshapeGrad(neighborDistance,h,gradShapedCoeefficient,position[particleId].lo,position[neighborId].lo,simulationScale);
+			u_ji = displacement[neighborId - LIQUID_PARTICLE_COUNT] - displacement[particleId - LIQUID_PARTICLE_COUNT];
+			/**/
+			rowVec.x = gradVec.x;
+			column1.x = u_ji.x;
+			column2.x = u_ji.y;
+			column3.x = u_ji.z;
+			gradDisplacement1 += volume[neighborId - LIQUID_PARTICLE_COUNT] * multRowOnColumn(rowVec,column1,column2,column3);
+			rowVec = nullVec;
+			rowVec.y = gradVec.y;
+			gradDisplacement2 += volume[neighborId - LIQUID_PARTICLE_COUNT] * multRowOnColumn(rowVec,column1,column2,column3);
+			rowVec = nullVec;
+			rowVec.z = gradVec.z;
+			gradDisplacement3 += volume[neighborId - LIQUID_PARTICLE_COUNT] * multRowOnColumn(rowVec,column1,column2,column3);
+			
+			/**/
+		}
+		j++;
+	}
+	u.x = gradDisplacement1.x;
+	u.y = gradDisplacement2.x;
+	u.z = gradDisplacement3.x;
+	u.w = 0;
+	v.x = gradDisplacement1.y;
+	v.y = gradDisplacement2.y;
+	v.z = gradDisplacement3.y;
+	v.w = 0;
+	w.x = gradDisplacement1.z;
+	w.y = gradDisplacement2.z;
+	w.z = gradDisplacement3.z;
+	w.w = 0;
+	calcStressJacobianMult(&u,&v,&w,poisson_ratio,young_module,&row1,&row2,&row3);
+	
+	force.x = -2 * volume[particleId] * ( row1.x * d_ij.x + row1.y * d_ij.y + row1.z * d_ij.z );
+	force.y = -2 * volume[particleId] * ( row2.x * d_ij.x + row2.y * d_ij.y + row2.z * d_ij.z );
+	force.z = -2 * volume[particleId] * ( row3.x * d_ij.x + row3.y * d_ij.y + row3.z * d_ij.z );
+	force.w = 0;
+	//return result;
+}
 
 __kernel void integrate(
 						__global float4 * acceleration,
@@ -848,30 +1150,53 @@ __kernel void integrate(
 						float zmin,
 						float zmax,
 						float damping,
-						__global float4 * position,
-						__global float4 * velocity
+						__global float8 * position,
+						__global float4 * velocity,
+						__global uint * elasticParticleCurrentIndex,
+						__global float4 * displacement
 						)
 {
 	int id = get_global_id( 0 );
 	float4 acceleration_ = acceleration[ id ];
-	float4 position_ = sortedPosition[ id ];
-	float4 velocity_ = sortedVelocity[ id ];
-
+	float4 position_;
+	float4 velocity_;
+	int realId;
+	if(id>LIQUID_PARTICLE_COUNT){
+		realId = elasticParticleCurrentIndex[id - LIQUID_PARTICLE_COUNT];
+	}
+	position_ = sortedPosition[ id ];
+	velocity_ = sortedVelocity[ id ];
 	// apply external forces
 	float4 gravity = (float4)( gravity_x, gravity_y, gravity_z, 0.0f );
 	acceleration_ += gravity;
 
-	// Semi-implicit Euler integration 
-	float4 newVelocity_ = velocity_ + timeStep * acceleration_;
-	float posTimeStep = timeStep * simulationScaleInv; 
-	float4 newPosition_ = position_ + posTimeStep * newVelocity_;
+	if(id < LIQUID_PARTICLE_COUNT){
+		
+		// Semi-implicit Euler integration 
+		float4 newVelocity_ = velocity_ + timeStep * acceleration_;
+		float posTimeStep = timeStep * simulationScaleInv; 
+		float4 newPosition_ = position_ + posTimeStep * newVelocity_;
 
-	handleBoundaryConditions( position_, &newVelocity_, posTimeStep, &newPosition_,
-		xmin, xmax, ymin, ymax, zmin, zmax, damping );
+		handleBoundaryConditions( position_, &newVelocity_, posTimeStep, &newPosition_,
+			xmin, xmax, ymin, ymax, zmin, zmax, damping );
 
-	newPosition_.w = 1.0f; // homogeneous coordinate for rendering
-	velocity[ id ] = newVelocity_;
-	position[ id ] = newPosition_;
+		newPosition_.w = 1.0f; // homogeneous coordinate for rendering
+		velocity[ id ] = newVelocity_;
+		position[ id ].x = newPosition_.x;
+		position[ id ].y = newPosition_.y;
+		position[ id ].z = newPosition_.z;
+	}
+	else{//If elastic matter
+		//ElasticForceContribution
+		float4 newVelocity_ = velocity_ + timeStep * acceleration_;
+		float posTimeStep = timeStep * simulationScaleInv; 
+		float4 newPosition_ = position_ + posTimeStep * newVelocity_;
+
+		handleBoundaryConditions( position_, &newVelocity_, posTimeStep, &newPosition_,
+			xmin, xmax, ymin, ymax, zmin, zmax, damping );
+		float4 displacement = newPosition_ - position[realId].lo;
+		
+	}
 }
 
 
@@ -880,20 +1205,24 @@ __kernel void integrate(
 
 __kernel void sortPostPass(
 						   __global uint2 * particleIndex,
-						   __global float4 * position,
+						   __global float8 * position,
 						   __global float4 * velocity,
 						   __global float4 * sortedPosition,
-						   __global float4 * sortedVelocity
+						   __global float4 * sortedVelocity,
+						   __global uint * elasticParticleCurrentIndex
 						   )
 {
 	int id = get_global_id( 0 );
+	if(id >= LIQUID_PARTICLE_COUNT){
+		
+		elasticParticleCurrentIndex[PI_SERIAL_ID(particleIndex[id]) - LIQUID_PARTICLE_COUNT] = id;
+	}
 	uint2 spi = particleIndex[ id ];//contains id of cell and id of particle it has sorted 
 	int serialId = PI_SERIAL_ID( spi );//get a particle Index
 	int cellId = PI_CELL_ID( spi );//get a cell Index
-	float4 position_ = position[ serialId ];//get position by serialId
+	float4 position_ = position[ serialId ].lo;
 	POSITION_CELL_ID( position_ ) = (float)cellId;
 	float4 velocity_ = velocity[ serialId ];
-	sortedVelocity[ id ] = velocity_;//put velocity to sotedVelocity for right order according to particleIndex
-	sortedPosition[ id ] = position_;//put position to sotedVelocity for right order according to particleIndex
+	sortedVelocity[ id ] = velocity_;//put velocity to sortedVelocity for right order according to particleIndex
+	sortedPosition[ id ] = position_;//put position to sortedVelocity for right order according to particleIndex
 }
-

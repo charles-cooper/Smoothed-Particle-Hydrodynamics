@@ -34,7 +34,7 @@ extern int sph_fluid_main_start ();
 extern void sph_fluid_main_step ();
 extern void sph_fluid_main_stop ();
 
-int pId = 1234;
+int pId = 25000;
  
 GLvoid display(GLvoid)
 {
@@ -184,7 +184,7 @@ GLvoid display(GLvoid)
 		//glTranslated( (positionBuffer[i*4]-XMAX/2)*sc , (positionBuffer[i*4+1]-YMAX/2)*sc, (positionBuffer[i*4+2]-ZMAX/2)*sc );
 		//distrib[(int)(positionBuffer[i*4]*300/XMAX)]+=1.f;
 		//glutWireSphere( 1.0, 8, 8 );
-		glVertex3f((positionBuffer[i*4]-XMAX/2)*sc , (positionBuffer[i*4+1]-YMAX/2)*sc, (positionBuffer[i*4+2]-ZMAX/2)*sc );
+		glVertex3f((positionBuffer[i*8]-XMAX/2)*sc , (positionBuffer[i*8+1]-YMAX/2)*sc, (positionBuffer[i*8+2]-ZMAX/2)*sc );
 //		glutSolidSphere( 0.3*sc, 4, 2 );
 
 		glPopMatrix();
@@ -210,10 +210,10 @@ GLvoid display(GLvoid)
 			glPushMatrix();
 			//GLfloat vert[] = {0.f,0.f,0.f};
 			//glVertex3fv(vert);
-			x = (positionBuffer[i*4]-XMAX/2)*sc;
-			y = (positionBuffer[i*4+1]-XMAX/2)*sc;
-			z = (positionBuffer[i*4+2]-XMAX/2)*sc;
-			glTranslated( (positionBuffer[i*4]-XMAX/2)*sc , (positionBuffer[i*4+1]-YMAX/2)*sc, (positionBuffer[i*4+2]-ZMAX/2)*sc );
+			x = (positionBuffer[i*8]-XMAX/2)*sc;
+			y = (positionBuffer[i*8+1]-XMAX/2)*sc;
+			z = (positionBuffer[i*8+2]-XMAX/2)*sc;
+			glTranslated( (positionBuffer[i*8]-XMAX/2)*sc , (positionBuffer[i*8+1]-YMAX/2)*sc, (positionBuffer[i*8+2]-ZMAX/2)*sc );
 			
 			
 			glutSolidSphere( 0.2*sc, 4, 2 );
@@ -228,7 +228,7 @@ GLvoid display(GLvoid)
 	glColor3f(0.0,0.0,0.0);
     int i = pId;
 	glPushMatrix();
-	glTranslated( (positionBuffer[i*4]-XMAX/2)*sc , (positionBuffer[i*4+1]-YMAX/2)*sc, (positionBuffer[i*4+2]-ZMAX/2)*sc );
+	glTranslated( (positionBuffer[i*8]-XMAX/2)*sc , (positionBuffer[i*8+1]-YMAX/2)*sc, (positionBuffer[i*8+2]-ZMAX/2)*sc );
 	glutSolidSphere( 0.2*sc, 4, 2 );
 	glPopMatrix();
 
