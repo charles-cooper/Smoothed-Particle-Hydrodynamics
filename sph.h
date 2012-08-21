@@ -1,19 +1,22 @@
 #ifndef __SPH__
 #define __SPH__
 
-#define PARTICLE_COUNT ( 32 * 1024 )
+#define PARTICLE_COUNT ( 1024*16/*16*/ )
 #define NEIGHBOR_COUNT 32
+
+#define PCISPH 1 // change to 0 for ordinary SPH
+//int PCISPH = 1;
 
 #ifndef M_PI
 #define M_PI 3.1415927f
 #endif
 
 #define XMIN 0
-#define XMAX 100
+#define XMAX 150//50//100
 #define YMIN 0
-#define YMAX 40
+#define YMAX 150//40//80
 #define ZMIN 0
-#define ZMAX 40
+#define ZMAX 20//30
 
 
 #endif

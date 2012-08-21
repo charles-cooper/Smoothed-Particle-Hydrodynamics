@@ -50,14 +50,17 @@ const float stiffness = 0.75f;
 const float h = 3.34f;
 const float hashGridCellSize = 2.0f * h;
 const float hashGridCellSizeInv = 1.0f / hashGridCellSize;
-const float mass = 0.001f;
+const float mass = 0.0003f;//0.001
 const float simulationScale = 0.004f;
 const float simulationScaleInv = 1.0f / simulationScale;
-const float mu = 10.0f;
-const float timeStep = 0.0042f;
+const float mu = 10.0f;//why this value? Dynamic viscosity of water at 25 C = 0.89e-3 Pa*s
+const float timeStep = 0.0005;//0.0042f;
 const float CFLLimit = 100.0f;
 const int NK = NEIGHBOR_COUNT * PARTICLE_COUNT;
 const float damping = 0.75f;
+
+const float beta = timeStep*timeStep*mass*mass*2/(rho0*rho0);// B. Solenthaler's dissertation, formula 3.6 (end of page 30)
+const float betaInv = 1.f/beta;
 
 const float Wpoly6Coefficient = 315.0f / ( 64.0f * M_PI * pow( h * simulationScale, 9.0f ) );
 const float gradWspikyCoefficient= -45.0f / ( M_PI * pow( h * simulationScale, 6.0f ) );
@@ -66,6 +69,56 @@ const float del2WviscosityCoefficient = -gradWspikyCoefficient;
 const float gravity_x = 0.0f;
 const float gravity_y = -9.8f;
 const float gravity_z = 0.0f;
+
+float calcDelta()
+{
+    float x[] = { 1, 1, 0,-1,-1,-1, 0, 1, 1, 1, 0,-1,-1,-1, 0, 1, 1, 1, 0,-1,-1,-1, 0, 1, 2,-2, 0, 0, 0, 0, 0, 0 };
+    float y[] = { 0, 1, 1, 1, 0,-1,-1,-1, 0, 1, 1, 1, 0,-1,-1,-1, 0, 1, 1, 1, 0,-1,-1,-1, 0, 0, 2,-2, 0, 0, 0, 0 };
+    float z[] = { 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1,-1,-1,-1,-1,-1,-1,-1,-1, 0, 0, 0, 0, 2,-2, 1,-1 };
+    //float beta = dt * dt * m_particlemass * m_particlemass * 2 / (m_restDensity * m_restDensity);
+    //Vector3 sum1 = Vector3.Zero;
+	float sum1_x = 0.f;
+	float sum1_y = 0.f;
+	float sum1_z = 0.f;
+    float sum1 = 0.f, sum2 = 0.f;
+	float v_x = 0.f;
+	float v_y = 0.f;
+	float v_z = 0.f;
+	float dist;
+	float particleRadius = pow(mass/rho0,1.f/3.f);  // the value is about 0.01 instead of 
+	float h_r_2;									// my previous estimate = simulationScale*h/2 = 0.0066
+
+    for (int i = 0; i < 32; i++)
+    {
+		v_x = x[i] * 0.8f * particleRadius;
+		v_y = y[i] * 0.8f * particleRadius;
+		v_z = z[i] * 0.8f * particleRadius;
+
+        dist = sqrt(v_x*v_x+v_y*v_y+v_z*v_z);//scaled, right?
+
+        if (dist <= h)
+        {
+			h_r_2 = pow((h*simulationScale - dist),2);//scaled
+
+            sum1_x += h_r_2 * v_x / dist;
+			sum1_y += h_r_2 * v_y / dist;
+			sum1_z += h_r_2 * v_z / dist;
+
+            sum2 += h_r_2 * h_r_2;
+        }
+    }
+
+	sum1 = sum1_x*sum1_x + sum1_y*sum1_y + sum1_z*sum1_z;
+
+	//float result = 1.0f / (beta * (sum1_x*sum1_x + sum1_y*sum1_y + sum1_z*sum1_z + sum2));
+    //float result = 1.0f / (beta * gradWspikyCoefficient * gradWspikyCoefficient * (sum1 + sum2));
+	
+	return  1.0f / (beta * gradWspikyCoefficient * gradWspikyCoefficient * (sum1 + sum2));
+	 //delta = 0.82
+}
+
+const float delta = calcDelta();
+
 
 //int particleCount = PARTICLE_COUNT;//AP2012
 
@@ -88,16 +141,17 @@ cl::CommandQueue queue;
 cl::Program program;
 
 // Buffers
-cl::Buffer acceleration;
+cl::Buffer acceleration;// size * 2 // forceAcceleration and pressureForceAcceleration
 cl::Buffer gridCellIndex;
 cl::Buffer gridCellIndexFixedUp;
 cl::Buffer neighborMap;
-cl::Buffer particleIndex;// save list of [CellIndex, partivleIndex]
+cl::Buffer particleIndex;// list of pairs [CellIndex, particleIndex]
+cl::Buffer particleIndexBack;// list of indexes of particles before sort 
 cl::Buffer position;
 cl::Buffer pressure;
-cl::Buffer rho;
-cl::Buffer rhoInv;
-cl::Buffer sortedPosition;
+cl::Buffer rho;// size * 2
+cl::Buffer rhoInv;// for basic SPH only
+cl::Buffer sortedPosition;// size * 2
 cl::Buffer sortedVelocity;
 cl::Buffer velocity;
 
@@ -111,58 +165,19 @@ cl::Kernel indexPostPass;
 cl::Kernel indexx;
 cl::Kernel integrate;
 cl::Kernel sortPostPass;
-
+// additional kernels for PCISPH
+cl::Kernel pcisph_computeDensity;
+cl::Kernel pcisph_computeForcesAndInitPressure;
+cl::Kernel pcisph_integrate;
+cl::Kernel pcisph_predictPositions;
+cl::Kernel pcisph_predictDensity;
+cl::Kernel pcisph_correctPressure;
+cl::Kernel pcisph_computePressureForceAcceleration;
 /*//AP2012
 #ifdef NDEBUG
 amd::RadixSortCL radixSort;
 #endif
 *///AP2012
-
-/*
-#if !defined( NDEBUG )
-bool testBeginClearBuffers( cl::CommandQueue queue );
-bool testEndClearBuffers( cl::CommandQueue queue, int _NK, cl::Buffer neighborMap );
-bool testBeginComputeAcceleration( cl::CommandQueue queue );
-bool testEndComputeAcceleration( cl::CommandQueue queue, int _NK,
-								float simulationScale, float gradWspikyCoefficient,
-								float del2WviscosityCoefficient, float CFLLimit,
-								cl::Buffer neighborMap, cl::Buffer pressure, cl::Buffer rho,
-								cl::Buffer rhoInv, cl::Buffer sortedPosition, cl::Buffer sortedVelocity,
-								cl::Buffer acceleration,
-								float gravity_x, float gravity_y, float gravity_z,
-								float mass, float h, float mu );
-bool testBeginComputeDensityPressure( cl::CommandQueue queue );
-bool testEndComputeDensityPressure( cl::CommandQueue queue, int _NK, float mass, float h,
-								   float Wpoly6Coefficient, float rho0, float stiffness,
-								   cl::Buffer neighborMap, cl::Buffer pressure, cl::Buffer rho,
-								   cl::Buffer rhoInv, float simulationScale );
-bool testBeginFindNeighbors( cl::CommandQueue queue );
-bool testEndFindNeighbors( cl::CommandQueue queue, int gridCellCount, float hashGridCellSize, float hashGridCellSizeInv,
-						  cl::Buffer gridCellIndexFixedUp, cl::Buffer sortedPosition, cl::Buffer neighborMap, int _NK,
-						  float simulationScale, float h );
-bool testBeginHashParticles( cl::CommandQueue queue );
-bool testEndHashParticles( cl::CommandQueue queue, float hashGridCellSize, int gridCellCount,
-						  int gridCellsX, int gridCellsY, int gridCellsZ,
-						  float xmin, float ymin, float zmin,
-						  cl::Buffer position, cl::Buffer particleIndex );
-bool testBeginIndexPostPass( cl::CommandQueue queue );
-bool testEndIndexPostPass( cl::CommandQueue queue, int gridCellCount, cl::Buffer gridCellIndex,
-						  cl::Buffer gridCellIndexFixedUp, cl::Buffer particleIndex );
-bool testBeginIndexx( cl::CommandQueue queue );
-bool testEndIndexx( cl::CommandQueue queue, int gridCellCount, cl::Buffer particleIndex,
-				  cl::Buffer gridCellIndex );
-bool testBeginIntegrate( cl::CommandQueue queue );
-bool testEndIntegrate( cl::CommandQueue queue, cl::Buffer acceleration, cl::Buffer sortedPosition,
-					  cl::Buffer sortedVelocity, cl::Buffer position, cl::Buffer velocity,
-					  float xmin, float ymin, float zmin, float xmax, float ymax, float zmax );
-bool testBeginSort( cl::CommandQueue queue, cl::Buffer particleIndex, int gridCellCount );
-bool testEndSort( cl::CommandQueue queue, cl::Buffer particleIndex );
-bool testBeginSortPostPass( cl::CommandQueue queue );
-bool testEndSortPostPass( cl::CommandQueue queue, cl::Buffer particleIndex, cl::Buffer position,
-						 cl::Buffer velocity, cl::Buffer sortedPosition, cl::Buffer sortedVelocity,
-						 int gridCellCount );
-#endif//NDEBUG
-*/
 
 /*
 Code:
@@ -226,30 +241,7 @@ _runClearBuffers( cl::CommandQueue queue ){
 	return 0;
 }
 
-/*
-#if !defined( NDEBUG )
 
-unsigned int
-_testClearBuffers( cl::CommandQueue queue ){
-	queue.finish();
-	// Invoke stage ClearBuffers
-	bool thisTestPassed = true;
-	std::cerr << "Testing stage ClearBuffers:" << std::endl;
-	thisTestPassed &= testBeginClearBuffers( queue );
-	unsigned int result = _runClearBuffers( queue );
-	queue.finish();
-	thisTestPassed &= testEndClearBuffers( queue, NK, neighborMap );
-
-	if( !thisTestPassed ){
-		std::cerr << "Test FAILED in stage ClearBuffers" << std::endl;
-	}else{
-		std::cerr << "Test SUCCEEDED in stage ClearBuffers" << std::endl;
-	}
-	return result;
-}
-
-#endif
-*/
 
 unsigned int
 _runComputeAcceleration( cl::CommandQueue queue ){
@@ -260,14 +252,16 @@ _runComputeAcceleration( cl::CommandQueue queue ){
 	computeAcceleration.setArg( 3, rhoInv );
 	computeAcceleration.setArg( 4, sortedPosition );
 	computeAcceleration.setArg( 5, sortedVelocity );
-	computeAcceleration.setArg( 6, CFLLimit );
-	computeAcceleration.setArg( 7, del2WviscosityCoefficient );
-	computeAcceleration.setArg( 8, gradWspikyCoefficient );
-	computeAcceleration.setArg( 9, h );
-	computeAcceleration.setArg( 10, mass );
-	computeAcceleration.setArg( 11, mu );
-	computeAcceleration.setArg( 12, simulationScale );
-	computeAcceleration.setArg( 13, acceleration );
+	computeAcceleration.setArg( 6, particleIndexBack );
+	computeAcceleration.setArg( 7, CFLLimit );
+	computeAcceleration.setArg( 8, del2WviscosityCoefficient );
+	computeAcceleration.setArg( 9, gradWspikyCoefficient );
+	computeAcceleration.setArg( 10, h );
+	computeAcceleration.setArg( 11, mass );
+	computeAcceleration.setArg( 12, mu );
+	computeAcceleration.setArg( 13, simulationScale );
+	computeAcceleration.setArg( 14, acceleration );
+	computeAcceleration.setArg( 15, rho0 );
 	queue.enqueueNDRangeKernel(
 		computeAcceleration, cl::NullRange, cl::NDRange( (int) ( PARTICLE_COUNT ) ),
 #if defined( __APPLE__ )
@@ -281,48 +275,56 @@ _runComputeAcceleration( cl::CommandQueue queue ){
 	return 0;
 }
 
-/*
-#if !defined( NDEBUG )
 
 unsigned int
-_testComputeAcceleration( cl::CommandQueue queue ){
+_run_pcisph_computePressureForceAcceleration( cl::CommandQueue queue ){
+	// Stage ComputeAcceleration
+	pcisph_computePressureForceAcceleration.setArg( 0, neighborMap );
+	pcisph_computePressureForceAcceleration.setArg( 1, pressure );
+	pcisph_computePressureForceAcceleration.setArg( 2, rho );
+	pcisph_computePressureForceAcceleration.setArg( 3, rhoInv );
+	pcisph_computePressureForceAcceleration.setArg( 4, sortedPosition );
+	pcisph_computePressureForceAcceleration.setArg( 5, sortedVelocity );
+	pcisph_computePressureForceAcceleration.setArg( 6, particleIndexBack );
+	pcisph_computePressureForceAcceleration.setArg( 7, CFLLimit );
+	pcisph_computePressureForceAcceleration.setArg( 8, del2WviscosityCoefficient );
+	pcisph_computePressureForceAcceleration.setArg( 9, gradWspikyCoefficient );
+	pcisph_computePressureForceAcceleration.setArg( 10, h );
+	pcisph_computePressureForceAcceleration.setArg( 11, mass );
+	pcisph_computePressureForceAcceleration.setArg( 12, mu );
+	pcisph_computePressureForceAcceleration.setArg( 13, simulationScale );
+	pcisph_computePressureForceAcceleration.setArg( 14, acceleration );
+	pcisph_computePressureForceAcceleration.setArg( 15, rho0 );
+	queue.enqueueNDRangeKernel(
+		pcisph_computePressureForceAcceleration, cl::NullRange, cl::NDRange( (int) ( PARTICLE_COUNT ) ),
+#if defined( __APPLE__ )
+		cl::NullRange, NULL, NULL );
+#else
+		cl::NDRange( (int)( 256 ) ), NULL, NULL );
+#endif
+#ifdef QUEUE_EACH_KERNEL
 	queue.finish();
-	// Invoke stage ComputeAcceleration
-	bool thisTestPassed = true;
-	std::cerr << "Testing stage ComputeAcceleration:" << std::endl;
-	thisTestPassed &= testBeginComputeAcceleration( queue );
-	unsigned int result = _runComputeAcceleration( queue );
-	queue.finish();
-	thisTestPassed &= testEndComputeAcceleration( queue, NK, 
-		simulationScale, gradWspikyCoefficient, del2WviscosityCoefficient, CFLLimit,
-		neighborMap, pressure, rho, rhoInv, sortedPosition, sortedVelocity, acceleration,
-		gravity_x, gravity_y, gravity_z, mass, h, mu );
-
-	if( !thisTestPassed ){
-		std::cerr << "Test FAILED in stage ComputeAcceleration" << std::endl;
-	}else{
-		std::cerr << "Test SUCCEEDED in stage ComputeAcceleration" << std::endl;
-	}
-	return result;
+#endif
+	return 0;
 }
 
-
-#endif
-*/
-
 unsigned int
-_runComputeDensityPressure( cl::CommandQueue queue ){
+_runComputeDensityPressure( cl::CommandQueue queue){
 	// Stage ComputeDensityPressure
 	computeDensityPressure.setArg( 0, neighborMap );
 	computeDensityPressure.setArg( 1, Wpoly6Coefficient );
-	computeDensityPressure.setArg( 2, h );
-	computeDensityPressure.setArg( 3, mass );
-	computeDensityPressure.setArg( 4, rho0 );
-	computeDensityPressure.setArg( 5, simulationScale );
-	computeDensityPressure.setArg( 6, stiffness );
-	computeDensityPressure.setArg( 7, pressure );
-	computeDensityPressure.setArg( 8, rho );
-	computeDensityPressure.setArg( 9, rhoInv );
+	computeDensityPressure.setArg( 2, gradWspikyCoefficient );
+	computeDensityPressure.setArg( 3, h );
+	computeDensityPressure.setArg( 4, mass );
+	computeDensityPressure.setArg( 5, rho0 );
+	computeDensityPressure.setArg( 6, simulationScale );
+	computeDensityPressure.setArg( 7, stiffness );
+	computeDensityPressure.setArg( 8, sortedPosition );
+	computeDensityPressure.setArg( 9, pressure );
+	computeDensityPressure.setArg(10, rho );
+	computeDensityPressure.setArg(11, rhoInv );
+	computeDensityPressure.setArg(12, particleIndexBack );
+	computeDensityPressure.setArg(13, delta );
 	queue.enqueueNDRangeKernel(
 		computeDensityPressure, cl::NullRange, cl::NDRange( (int) ( PARTICLE_COUNT ) ),
 #if defined( __APPLE__ )
@@ -335,31 +337,41 @@ _runComputeDensityPressure( cl::CommandQueue queue ){
 #endif
 	return 0;
 }
-/*
-#if !defined( NDEBUG )
+
 
 unsigned int
-_testComputeDensityPressure( cl::CommandQueue queue ){
+_run_pcisph_computeDensity( cl::CommandQueue queue){
+	// Stage ComputeDensityPressure
+	pcisph_computeDensity.setArg( 0, neighborMap );
+	pcisph_computeDensity.setArg( 1, Wpoly6Coefficient );
+	pcisph_computeDensity.setArg( 2, gradWspikyCoefficient );
+	pcisph_computeDensity.setArg( 3, h );
+	pcisph_computeDensity.setArg( 4, mass );
+	pcisph_computeDensity.setArg( 5, rho0 );
+	pcisph_computeDensity.setArg( 6, simulationScale );
+	pcisph_computeDensity.setArg( 7, stiffness );
+	pcisph_computeDensity.setArg( 8, sortedPosition );
+	pcisph_computeDensity.setArg( 9, pressure );
+	pcisph_computeDensity.setArg(10, rho );
+	pcisph_computeDensity.setArg(11, rhoInv );
+	pcisph_computeDensity.setArg(12, particleIndexBack );
+	pcisph_computeDensity.setArg(13, delta );
+	queue.enqueueNDRangeKernel(
+		pcisph_computeDensity, cl::NullRange, cl::NDRange( (int) ( PARTICLE_COUNT ) ),
+#if defined( __APPLE__ )
+		cl::NullRange, NULL, NULL );
+#else
+		cl::NDRange( (int)( 256 ) ), NULL, NULL );
+#endif
+#ifdef QUEUE_EACH_KERNEL
 	queue.finish();
-	// Invoke stage ComputeDensityPressure
-	bool thisTestPassed = true;
-	std::cerr << "Testing stage ComputeDensityPressure:" << std::endl;
-	thisTestPassed &= testBeginComputeDensityPressure( queue );
-	unsigned int result = _runComputeDensityPressure( queue );
-	queue.finish();
-	thisTestPassed &= testEndComputeDensityPressure( queue, NK, mass, h, Wpoly6Coefficient,
-		rho0, stiffness, neighborMap, pressure, rho, rhoInv, simulationScale );
-
-	if( !thisTestPassed ){
-		std::cerr << "Test FAILED in stage ComputeDensityPressure" << std::endl;
-	}else{
-		std::cerr << "Test SUCCEEDED in stage ComputeDensityPressure" << std::endl;
-	}
-	return result;
+#endif
+	return 0;
 }
 
-#endif
-*/
+
+
+
 
 unsigned int
 _runFindNeighbors( cl::CommandQueue queue ){
@@ -392,32 +404,6 @@ _runFindNeighbors( cl::CommandQueue queue ){
 	return 0;
 }
 
-/*
-#if !defined( NDEBUG )
-
-unsigned int
-_testFindNeighbors( cl::CommandQueue queue ){
-	queue.finish();
-	// Invoke stage FindNeighbors
-	bool thisTestPassed = true;
-	std::cerr << "Testing stage FindNeighbors:" << std::endl;
-	thisTestPassed &= testBeginFindNeighbors( queue );
-	unsigned int result = _runFindNeighbors( queue );
-	queue.finish();
-	thisTestPassed &= testEndFindNeighbors( queue, gridCellCount, hashGridCellSize,
-		hashGridCellSizeInv, gridCellIndexFixedUp, sortedPosition, neighborMap, NK,
-		simulationScale, h );
-
-	if( !thisTestPassed ){
-		std::cerr << "Test FAILED in stage FindNeighbors" << std::endl;
-	}else{
-		std::cerr << "Test SUCCEEDED in stage FindNeighbors" << std::endl;
-	}
-	return result;
-}
-
-#endif
-*/
 
 
 
@@ -446,31 +432,6 @@ _runHashParticles( cl::CommandQueue queue ){
 	return 0;
 }
 
-/*
-#if !defined( NDEBUG )
-
-unsigned int
-_testHashParticles( cl::CommandQueue queue ){
-	queue.finish();
-	// Invoke stage HashParticles
-	bool thisTestPassed = true;
-	std::cerr << "Testing stage HashParticles:" << std::endl;
-	thisTestPassed &= testBeginHashParticles( queue );
-	unsigned int result = _runHashParticles( queue );
-	queue.finish();
-	thisTestPassed &= testEndHashParticles( queue, hashGridCellSize, gridCellCount,
-		gridCellsX, gridCellsY, gridCellsZ, xmin, ymin, zmin, position, particleIndex );
-
-	if( !thisTestPassed ){
-		std::cerr << "Test FAILED in stage HashParticles" << std::endl;
-	}else{
-		std::cerr << "Test SUCCEEDED in stage HashParticles" << std::endl;
-	}
-	return result;
-}
-
-#endif
-*/
 
 
 unsigned int
@@ -528,31 +489,6 @@ _runIndexPostPass( cl::CommandQueue queue ){
 	return 0;
 }
 
-/*
-#if !defined( NDEBUG )
-
-unsigned int
-_testIndexPostPass( cl::CommandQueue queue ){
-	queue.finish();
-	// Invoke stage IndexPostPass
-	bool thisTestPassed = true;
-	std::cerr << "Testing stage IndexPostPass:" << std::endl;
-	thisTestPassed &= testBeginIndexPostPass( queue );
-	unsigned int result = _runIndexPostPass( queue );
-	queue.finish();
-	thisTestPassed &= testEndIndexPostPass( queue, gridCellCount, gridCellIndex,
-		gridCellIndexFixedUp, particleIndex );
-
-	if( !thisTestPassed ){
-		std::cerr << "Test FAILED in stage IndexPostPass" << std::endl;
-	}else{
-		std::cerr << "Test SUCCEEDED in stage IndexPostPass" << std::endl;
-	}
-	return result;
-}
-
-#endif
-*/
 
 unsigned int
 _runIndexx( cl::CommandQueue queue ){
@@ -575,52 +511,30 @@ _runIndexx( cl::CommandQueue queue ){
 	return 0;
 }
 
-/*
-#if !defined( NDEBUG )
-
-unsigned int
-_testIndexx( cl::CommandQueue queue ){
-	queue.finish();
-	// Invoke stage Indexx
-	bool thisTestPassed = true;
-	std::cerr << "Testing stage Indexx:" << std::endl;
-	thisTestPassed &= testBeginIndexx( queue );
-	unsigned int result = _runIndexx( queue );
-	queue.finish();
-	thisTestPassed &= testEndIndexx( queue, gridCellCount, particleIndex, gridCellIndex );
-
-	if( !thisTestPassed ){
-		std::cerr << "Test FAILED in stage Indexx" << std::endl;
-	}else{
-		std::cerr << "Test SUCCEEDED in stage Indexx" << std::endl;
-	}
-	return result;
-}
-
-#endif
-*/
 
 
 unsigned int
-_runIntegrate( cl::CommandQueue queue ){
+_runIntegrate( cl::CommandQueue queue){
 	// Stage Integrate
 	integrate.setArg( 0, acceleration );
 	integrate.setArg( 1, sortedPosition );
 	integrate.setArg( 2, sortedVelocity );
-	integrate.setArg( 3, gravity_x );
-	integrate.setArg( 4, gravity_y );
-	integrate.setArg( 5, gravity_z );
-	integrate.setArg( 6, simulationScaleInv );
-	integrate.setArg( 7, timeStep );
-	integrate.setArg( 8, xmin );
-	integrate.setArg( 9, xmax );
-	integrate.setArg( 10, ymin );
-	integrate.setArg( 11, ymax );
-	integrate.setArg( 12, zmin );
-	integrate.setArg( 13, zmax );
-	integrate.setArg( 14, damping );
-	integrate.setArg( 15, position );
-	integrate.setArg( 16, velocity );
+	integrate.setArg( 3, particleIndex );
+	integrate.setArg( 4, particleIndexBack );
+	integrate.setArg( 5, gravity_x );
+	integrate.setArg( 6, gravity_y );
+	integrate.setArg( 7, gravity_z );
+	integrate.setArg( 8, simulationScaleInv );
+	integrate.setArg( 9, timeStep );
+	integrate.setArg( 10, xmin );
+	integrate.setArg( 11, xmax );
+	integrate.setArg( 12, ymin );
+	integrate.setArg( 13, ymax );
+	integrate.setArg( 14, zmin );
+	integrate.setArg( 15, zmax );
+	integrate.setArg( 16, damping );
+	integrate.setArg( 17, position );
+	integrate.setArg( 18, velocity );
 	queue.enqueueNDRangeKernel(
 		integrate, cl::NullRange, cl::NDRange( (int) ( PARTICLE_COUNT ) ),
 #if defined( __APPLE__ )
@@ -634,31 +548,77 @@ _runIntegrate( cl::CommandQueue queue ){
 	return 0;
 }
 
-/*
-#if !defined( NDEBUG )
-
 unsigned int
-_testIntegrate( cl::CommandQueue queue ){
+_run_pcisph_integrate( cl::CommandQueue queue){
+	// Stage Integrate
+	pcisph_integrate.setArg( 0, acceleration );
+	pcisph_integrate.setArg( 1, sortedPosition );
+	pcisph_integrate.setArg( 2, sortedVelocity );
+	pcisph_integrate.setArg( 3, particleIndex );
+	pcisph_integrate.setArg( 4, particleIndexBack );
+	pcisph_integrate.setArg( 5, gravity_x );
+	pcisph_integrate.setArg( 6, gravity_y );
+	pcisph_integrate.setArg( 7, gravity_z );
+	pcisph_integrate.setArg( 8, simulationScaleInv );
+	pcisph_integrate.setArg( 9, timeStep );
+	pcisph_integrate.setArg( 10, xmin );
+	pcisph_integrate.setArg( 11, xmax );
+	pcisph_integrate.setArg( 12, ymin );
+	pcisph_integrate.setArg( 13, ymax );
+	pcisph_integrate.setArg( 14, zmin );
+	pcisph_integrate.setArg( 15, zmax );
+	pcisph_integrate.setArg( 16, damping );
+	pcisph_integrate.setArg( 17, position );
+	pcisph_integrate.setArg( 18, velocity );
+	pcisph_integrate.setArg( 19, rho );
+	queue.enqueueNDRangeKernel(
+		pcisph_integrate, cl::NullRange, cl::NDRange( (int) ( PARTICLE_COUNT ) ),
+#if defined( __APPLE__ )
+		cl::NullRange, NULL, NULL );
+#else
+		cl::NDRange( (int)( 256 ) ), NULL, NULL );
+#endif
+#ifdef QUEUE_EACH_KERNEL
 	queue.finish();
-	// Invoke stage Integrate
-	bool thisTestPassed = true;
-	std::cerr << "Testing stage Integrate:" << std::endl;
-	thisTestPassed &= testBeginIntegrate( queue );
-	unsigned int result = _runIntegrate( queue );
-	queue.finish();
-	thisTestPassed &= testEndIntegrate( queue, acceleration, sortedPosition, sortedVelocity,
-		position, velocity, xmin, ymin, zmin, xmax, ymax, zmax );
-
-	if( !thisTestPassed ){
-		std::cerr << "Test FAILED in stage Integrate" << std::endl;
-	}else{
-		std::cerr << "Test SUCCEEDED in stage Integrate" << std::endl;
-	}
-	return result;
+#endif
+	return 0;
 }
 
+unsigned int
+_run_pcisph_predictPositions( cl::CommandQueue queue){
+	//
+	pcisph_predictPositions.setArg( 0, acceleration );
+	pcisph_predictPositions.setArg( 1, sortedPosition );
+	pcisph_predictPositions.setArg( 2, sortedVelocity );
+	pcisph_predictPositions.setArg( 3, particleIndex );
+	pcisph_predictPositions.setArg( 4, particleIndexBack );
+	pcisph_predictPositions.setArg( 5, gravity_x );
+	pcisph_predictPositions.setArg( 6, gravity_y );
+	pcisph_predictPositions.setArg( 7, gravity_z );
+	pcisph_predictPositions.setArg( 8, simulationScaleInv );
+	pcisph_predictPositions.setArg( 9, timeStep );
+	pcisph_predictPositions.setArg( 10, xmin );
+	pcisph_predictPositions.setArg( 11, xmax );
+	pcisph_predictPositions.setArg( 12, ymin );
+	pcisph_predictPositions.setArg( 13, ymax );
+	pcisph_predictPositions.setArg( 14, zmin );
+	pcisph_predictPositions.setArg( 15, zmax );
+	pcisph_predictPositions.setArg( 16, damping );
+	pcisph_predictPositions.setArg( 17, position );
+	pcisph_predictPositions.setArg( 18, velocity );
+	queue.enqueueNDRangeKernel(
+		pcisph_predictPositions, cl::NullRange, cl::NDRange( (int) ( PARTICLE_COUNT ) ),
+#if defined( __APPLE__ )
+		cl::NullRange, NULL, NULL );
+#else
+		cl::NDRange( (int)( 256 ) ), NULL, NULL );
 #endif
-*/
+#ifdef QUEUE_EACH_KERNEL
+	queue.finish();
+#endif
+	return 0;
+}
+
 
 //#ifndef NDEBUG
 int myCompare( const void * v1, const void * v2 ){
@@ -681,7 +641,17 @@ _runSort( cl::CommandQueue queue ){
 	
 	queue.enqueueReadBuffer( particleIndex, CL_TRUE, 0, PARTICLE_COUNT * 2 * sizeof( int ), _particleIndex );
 	queue.finish();
+
 	qsort( _particleIndex, PARTICLE_COUNT, 2 * sizeof( int ), myCompare );
+
+	/*FILE *f2 = fopen("particleIndex.txt","wt");
+	for(int id=0;id<PARTICLE_COUNT;id++) 
+	{
+		fprintf(f2,"%d\t",_particleIndex[id*2]);
+		fprintf(f2,"%d\n",_particleIndex[id*2+1]);
+	}
+	fclose(f2);*/
+
 	queue.enqueueWriteBuffer( particleIndex, CL_TRUE, 0, PARTICLE_COUNT * 2 * sizeof( int ), _particleIndex );
 	queue.finish();	
 	//delete [] _particleIndex;
@@ -689,36 +659,17 @@ _runSort( cl::CommandQueue queue ){
 	return 0;
 }
 
-/*
-#if !defined( NDEBUG )
 
-unsigned int
-_testSort( cl::CommandQueue queue ){
-	// Invoke stage Sort
-	bool thisTestPassed = true;
-	std::cerr << "Testing stage Sort:" << std::endl;
-	thisTestPassed &= testBeginSort( queue, particleIndex, gridCellCount );
-	unsigned int result = _runSort( queue );
-	thisTestPassed &= testEndSort( queue, particleIndex );
-	if( !thisTestPassed ){
-		std::cerr << "Test FAILED in stage Sort" << std::endl;
-	}else{
-		std::cerr << "Test SUCCEEDED in stage Sort" << std::endl;
-	}
-	return result;
-}
-
-#endif
-*/
 
 unsigned int
 _runSortPostPass( cl::CommandQueue queue ){
 	// Stage SortPostPass
 	sortPostPass.setArg( 0, particleIndex );
-	sortPostPass.setArg( 1, position );
-	sortPostPass.setArg( 2, velocity );
-	sortPostPass.setArg( 3, sortedPosition );
-	sortPostPass.setArg( 4, sortedVelocity );
+	sortPostPass.setArg( 1, particleIndexBack );
+	sortPostPass.setArg( 2, position );
+	sortPostPass.setArg( 3, velocity );
+	sortPostPass.setArg( 4, sortedPosition );
+	sortPostPass.setArg( 5, sortedVelocity );
 	queue.enqueueNDRangeKernel(
 		sortPostPass, cl::NullRange, cl::NDRange( (int) ( PARTICLE_COUNT ) ),
 #if defined( __APPLE__ )
@@ -732,35 +683,317 @@ _runSortPostPass( cl::CommandQueue queue ){
 	return 0;
 }
 
-/*
-#if !defined( NDEBUG )
 
+// additional functions used for PCISPH
 unsigned int
-_testSortPostPass( cl::CommandQueue queue ){
-	queue.finish();
-	// Invoke stage SortPostPass
-	bool thisTestPassed = true;
-	std::cerr << "Testing stage SortPostPass:" << std::endl;
-	thisTestPassed &= testBeginSortPostPass( queue );
-	unsigned int result = _runSortPostPass( queue );
-	queue.finish();
-	thisTestPassed &= testEndSortPostPass( queue, particleIndex, position, velocity,
-		sortedPosition, sortedVelocity, gridCellCount );
+_run_pcisph_computeForcesAndInitPressure( cl::CommandQueue queue ){
 
-	if( !thisTestPassed ){
-		std::cerr << "Test FAILED in stage SortPostPass" << std::endl;
-	}else{
-		std::cerr << "Test SUCCEEDED in stage SortPostPass" << std::endl;
-	}
-	return result;
+	pcisph_computeForcesAndInitPressure.setArg( 0, neighborMap );
+	pcisph_computeForcesAndInitPressure.setArg( 1, rho );
+	pcisph_computeForcesAndInitPressure.setArg( 2, pressure );
+	pcisph_computeForcesAndInitPressure.setArg( 3, sortedPosition );
+	pcisph_computeForcesAndInitPressure.setArg( 4, sortedVelocity );
+	pcisph_computeForcesAndInitPressure.setArg( 5, acceleration );
+	pcisph_computeForcesAndInitPressure.setArg( 6, particleIndexBack );
+	pcisph_computeForcesAndInitPressure.setArg( 7, gradWspikyCoefficient );
+	pcisph_computeForcesAndInitPressure.setArg( 8, del2WviscosityCoefficient );
+	pcisph_computeForcesAndInitPressure.setArg( 9, h );
+	pcisph_computeForcesAndInitPressure.setArg(10, mass );
+	pcisph_computeForcesAndInitPressure.setArg(11, mu );
+	pcisph_computeForcesAndInitPressure.setArg(12, simulationScale );
+	pcisph_computeForcesAndInitPressure.setArg(13, gravity_x );
+	pcisph_computeForcesAndInitPressure.setArg(14, gravity_y );
+	pcisph_computeForcesAndInitPressure.setArg(15, gravity_z );
+	
+	queue.enqueueNDRangeKernel(
+		pcisph_computeForcesAndInitPressure, cl::NullRange, cl::NDRange( (int) ( PARTICLE_COUNT ) ),
+#if defined( __APPLE__ )
+		cl::NullRange, NULL, NULL );
+#else
+		cl::NDRange( (int)( 256 ) ), NULL, NULL );
+#endif
+#ifdef QUEUE_EACH_KERNEL
+	queue.finish();
+#endif
+	return 0;
 }
 
+
+
+unsigned int
+_run_pcisph_predictDensity( cl::CommandQueue queue ){
+	// Stage ComputeDensityPressure
+	pcisph_predictDensity.setArg( 0, neighborMap );
+	pcisph_predictDensity.setArg( 1, particleIndexBack );
+	pcisph_predictDensity.setArg( 2, Wpoly6Coefficient );
+	pcisph_predictDensity.setArg( 3, gradWspikyCoefficient );
+	pcisph_predictDensity.setArg( 4, h );
+	pcisph_predictDensity.setArg( 5, mass );
+	pcisph_predictDensity.setArg( 6, rho0 );
+	pcisph_predictDensity.setArg( 7, simulationScale );
+	pcisph_predictDensity.setArg( 8, stiffness );
+	pcisph_predictDensity.setArg( 9, sortedPosition );
+	pcisph_predictDensity.setArg(10, pressure );
+	pcisph_predictDensity.setArg(11, rho );
+	pcisph_predictDensity.setArg(12, rhoInv );
+	pcisph_predictDensity.setArg(13, delta );
+	queue.enqueueNDRangeKernel(
+		pcisph_predictDensity, cl::NullRange, cl::NDRange( (int) ( PARTICLE_COUNT ) ),
+#if defined( __APPLE__ )
+		cl::NullRange, NULL, NULL );
+#else
+		cl::NDRange( (int)( 256 ) ), NULL, NULL );
 #endif
-*/
+#ifdef QUEUE_EACH_KERNEL
+	queue.finish();
+#endif
+	return 0;
+}
+
+unsigned int
+_run_pcisph_correctPressure( cl::CommandQueue queue ){
+	// Stage ComputeDensityPressure
+	pcisph_correctPressure.setArg( 0, neighborMap );
+	pcisph_correctPressure.setArg( 1, particleIndexBack );
+	pcisph_correctPressure.setArg( 2, Wpoly6Coefficient );
+	pcisph_correctPressure.setArg( 3, gradWspikyCoefficient );
+	pcisph_correctPressure.setArg( 4, h );
+	pcisph_correctPressure.setArg( 5, mass );
+	pcisph_correctPressure.setArg( 6, rho0 );
+	pcisph_correctPressure.setArg( 7, simulationScale );
+	pcisph_correctPressure.setArg( 8, stiffness );
+	pcisph_correctPressure.setArg( 9, sortedPosition );
+	pcisph_correctPressure.setArg(10, pressure );
+	pcisph_correctPressure.setArg(11, rho );
+	pcisph_correctPressure.setArg(12, rhoInv );
+	pcisph_correctPressure.setArg(13, delta );
+	queue.enqueueNDRangeKernel(
+		pcisph_correctPressure, cl::NullRange, cl::NDRange( (int) ( PARTICLE_COUNT ) ),
+#if defined( __APPLE__ )
+		cl::NullRange, NULL, NULL );
+#else
+		cl::NDRange( (int)( 256 ) ), NULL, NULL );
+#endif
+#ifdef QUEUE_EACH_KERNEL
+	queue.finish();
+#endif
+	return 0;
+}
 
 
+//======================
 
-void step()
+void writeLog_density()
+{
+	int err;
+
+	err = queue.enqueueReadBuffer( rho, CL_TRUE, 0, PARTICLE_COUNT * sizeof( float ) * 1, positionBuffer );
+	if( err != CL_SUCCESS ){
+		throw std::runtime_error( "could not enqueue read" );
+	}
+	queue.finish();
+
+	FILE* flog = fopen("density.txt","wt");
+	for(int i=0;i<PARTICLE_COUNT;i++)
+	{
+		fprintf(flog,"%e\t",(float)positionBuffer[i]);
+	}
+	fprintf(flog,"\n");
+	fclose(flog);
+
+}
+
+void writeLog_neighbor_count()
+{
+	int err;
+
+	err = queue.enqueueReadBuffer( rhoInv, CL_TRUE, 0, PARTICLE_COUNT * sizeof( float ) * 1, positionBuffer );
+	if( err != CL_SUCCESS ){
+		throw std::runtime_error( "could not enqueue read" );
+	}
+	queue.finish();
+
+	float value = 0.f;
+
+	FILE* flog = fopen("neighbor_count.txt","a+");
+	for(int i=0;i<PARTICLE_COUNT;i++)
+	{
+		value += (float)positionBuffer[i];
+	}
+
+	value /= (float)PARTICLE_COUNT;
+
+	fprintf(flog,"%e\n",value);
+	fclose(flog);
+
+}
+
+void writeLog_density_pred()
+{
+	int err;
+
+	err = queue.enqueueReadBuffer( rho, CL_TRUE, 0, PARTICLE_COUNT * sizeof( float ) * 2, positionBuffer );
+	if( err != CL_SUCCESS ){
+		throw std::runtime_error( "could not enqueue read" );
+	}
+	queue.finish();
+
+	FILE* flog = fopen("density.txt","wt");
+	for(int i=0;i<PARTICLE_COUNT;i++)
+	{
+		fprintf(flog,"%e\t",(float)positionBuffer[i+PARTICLE_COUNT]);
+	}
+	fprintf(flog,"\n");
+	fclose(flog);
+
+}
+
+void writeLog_positions()
+{
+	int err;
+
+	err = queue.enqueueReadBuffer( sortedPosition, CL_TRUE, 0, PARTICLE_COUNT * sizeof( float ) * 8, positionBuffer );
+	if( err != CL_SUCCESS ){
+		throw std::runtime_error( "could not enqueue read" );
+	}
+	queue.finish();
+
+	FILE* flog = fopen("positions.txt","wt");
+	for(int i=0;i<PARTICLE_COUNT;i++)
+	{
+		fprintf(flog,"%e\t",(float)positionBuffer[PARTICLE_COUNT*4*0+i*4]);
+	}
+	fprintf(flog,"\n");
+	for(int i=0;i<PARTICLE_COUNT;i++)
+	{
+		fprintf(flog,"%e\t",(float)positionBuffer[PARTICLE_COUNT*4*0+i*4+1]);
+	}
+	fprintf(flog,"\n");
+	for(int i=0;i<PARTICLE_COUNT;i++)
+	{
+		fprintf(flog,"%e\t",(float)positionBuffer[PARTICLE_COUNT*4*0+i*4+2]);
+	}
+	fprintf(flog,"\n");
+
+	fclose(flog);
+
+}
+
+void writeLog_positions_pred()
+{
+	int err;
+
+	err = queue.enqueueReadBuffer( sortedPosition, CL_TRUE, 0, PARTICLE_COUNT * sizeof( float ) * 8, positionBuffer );
+	if( err != CL_SUCCESS ){
+		throw std::runtime_error( "could not enqueue read" );
+	}
+	queue.finish();
+
+	FILE* flog = fopen("positions.txt","wt");
+	for(int i=0;i<PARTICLE_COUNT;i++)
+	{
+		fprintf(flog,"%e\t",(float)positionBuffer[PARTICLE_COUNT*4+i*4]);
+	}
+	fprintf(flog,"\n");
+	for(int i=0;i<PARTICLE_COUNT;i++)
+	{
+		fprintf(flog,"%e\t",(float)positionBuffer[PARTICLE_COUNT*4+i*4+1]);
+	}
+	fprintf(flog,"\n");
+	for(int i=0;i<PARTICLE_COUNT;i++)
+	{
+		fprintf(flog,"%e\t",(float)positionBuffer[PARTICLE_COUNT*4+i*4+2]);
+	}
+	fprintf(flog,"\n");
+
+	fclose(flog);
+
+}
+
+void writeLog_accelerations()
+{
+	int err;
+
+	err = queue.enqueueReadBuffer( acceleration, CL_TRUE, 0, PARTICLE_COUNT * sizeof( float ) * 8, positionBuffer );
+	if( err != CL_SUCCESS ){
+		throw std::runtime_error( "could not enqueue read" );
+	}
+	queue.finish();
+
+	FILE* flog = fopen("accelerations.txt","wt");
+	for(int i=0;i<PARTICLE_COUNT;i++)
+	{
+		fprintf(flog,"%e\t",(float)positionBuffer[PARTICLE_COUNT*0+i*4]);
+	}
+	fprintf(flog,"\n");
+	for(int i=0;i<PARTICLE_COUNT;i++)
+	{
+		fprintf(flog,"%e\t",(float)positionBuffer[PARTICLE_COUNT*0+i*4+1]);
+	}
+	fprintf(flog,"\n");
+	for(int i=0;i<PARTICLE_COUNT;i++)
+	{
+		fprintf(flog,"%e\t",(float)positionBuffer[PARTICLE_COUNT*0+i*4+2]);
+	}
+	fprintf(flog,"\n");
+
+	fclose(flog);
+
+}
+
+void writeLog_accelerations_p()
+{
+	int err;
+
+	err = queue.enqueueReadBuffer( acceleration, CL_TRUE, 0, PARTICLE_COUNT * sizeof( float ) * 8, positionBuffer );
+	if( err != CL_SUCCESS ){
+		throw std::runtime_error( "could not enqueue read" );
+	}
+	queue.finish();
+
+	FILE* flog = fopen("accelerations_p.txt","wt");
+	for(int i=0;i<PARTICLE_COUNT;i++)
+	{
+		fprintf(flog,"%e\t",(float)positionBuffer[PARTICLE_COUNT*4+i*4]);
+	}
+	fprintf(flog,"\n");
+	for(int i=0;i<PARTICLE_COUNT;i++)
+	{
+		fprintf(flog,"%e\t",(float)positionBuffer[PARTICLE_COUNT*4+i*4+1]);
+	}
+	fprintf(flog,"\n");
+	for(int i=0;i<PARTICLE_COUNT;i++)
+	{
+		fprintf(flog,"%e\t",(float)positionBuffer[PARTICLE_COUNT*4+i*4+2]);
+	}
+	fprintf(flog,"\n");
+
+	fclose(flog);
+
+}
+
+
+void writeLog_pressure()
+{
+	int err;
+
+	err = queue.enqueueReadBuffer( pressure, CL_TRUE, 0, PARTICLE_COUNT * sizeof( float ) * 1, positionBuffer );
+	if( err != CL_SUCCESS ){
+		throw std::runtime_error( "could not enqueue read" );
+	}
+	queue.finish();
+
+	FILE* flog = fopen("pressure.txt","wt");
+	for(int i=0;i<PARTICLE_COUNT;i++)
+	{
+		fprintf(flog,"%e\t",(float)positionBuffer[i]);
+	}
+	fprintf(flog,"\n");
+	fclose(flog);
+
+}
+
+void step(int nIter)
 {
 	LARGE_INTEGER frequency;				// ticks per second
     LARGE_INTEGER t0, t1, t2;				// ticks
@@ -774,62 +1007,71 @@ void step()
 //#ifdef NDEBUG
 	printf("\n");
 
-	_runClearBuffers( queue ); queue.finish();
-	QueryPerformanceCounter(&t2);
-	printf("_runClearBuffers: \t%9.3f ms\n",	(t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart); t1 = t2;
+	/* THIS IS COMMON PART FOR BOTH SPH AND PCISPH*/
 
-	_runHashParticles( queue ); queue.finish();
-	QueryPerformanceCounter(&t2);
-	printf("_runHashParticles: \t%9.3f ms\n",	(t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart); t1 = t2;
+	_runClearBuffers( queue ); queue.finish();			 QueryPerformanceCounter(&t2); printf("_runClearBuffers: \t%9.3f ms\n",				(t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart); t1 = t2;
 
-	_runSort( queue ); queue.finish();// <--here 
-	QueryPerformanceCounter(&t2);
-	printf("_runSort: \t%9.3f ms\n",	(t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart); t1 = t2;
+	_runHashParticles( queue ); queue.finish();			 QueryPerformanceCounter(&t2); printf("_runHashParticles: \t%9.3f ms\n",			(t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart); t1 = t2;
 
-	_runSortPostPass( queue ); queue.finish();
-	QueryPerformanceCounter(&t2);
-	printf("_runSortPostPass: \t%9.3f ms\n",	(t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart); t1 = t2;
+	_runSort( queue ); queue.finish(); 					 QueryPerformanceCounter(&t2); printf("_runSort: \t\t%9.3f ms\n",						(t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart); t1 = t2;
 
-	_runIndexx( queue ); queue.finish();
-	QueryPerformanceCounter(&t2);
-	printf("_runIndexx: \t%9.3f ms\n",	(t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart); t1 = t2;
+	_runSortPostPass( queue ); queue.finish();			 QueryPerformanceCounter(&t2); printf("_runSortPostPass: \t%9.3f ms\n",				(t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart); t1 = t2;
 
-	_runIndexPostPass( queue ); queue.finish();
-	QueryPerformanceCounter(&t2);
-	printf("_runIndexPostPass: \t%9.3f ms\n",	(t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart); t1 = t2;
+	_runIndexx( queue ); queue.finish();				 QueryPerformanceCounter(&t2); printf("_runIndexx: \t\t%9.3f ms\n",					(t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart); t1 = t2;
 
-	_runFindNeighbors( queue ); queue.finish();
-	QueryPerformanceCounter(&t2);
-	printf("_runFindNeighbors: \t%9.3f ms\n",	(t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart); t1 = t2;
+	_runIndexPostPass( queue ); queue.finish();			 QueryPerformanceCounter(&t2); printf("_runIndexPostPass: \t%9.3f ms\n",			(t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart); t1 = t2;
 
-    _runComputeDensityPressure( queue ); queue.finish();
-	QueryPerformanceCounter(&t2);
-	printf("_runComputeDensityPressure: \t%9.3f ms\n",	(t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart); t1 = t2;
+	_runFindNeighbors( queue ); queue.finish();			 QueryPerformanceCounter(&t2); printf("_runFindNeighbors: \t%9.3f ms\n",			(t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart); t1 = t2;
 
-    _runComputeAcceleration( queue ); queue.finish();
-	QueryPerformanceCounter(&t2);
-	printf("_runComputeAcceleration: \t%9.3f ms\n",	(t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart); t1 = t2;
+	// basic SPH
+	if(PCISPH==0)
+	{
+		_runComputeDensityPressure( queue ); queue.finish(); QueryPerformanceCounter(&t2); printf("_runComputeDensityPressure: \t%9.3f ms\n",	(t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart); t1 = t2;
 
-	_runIntegrate( queue ); queue.finish();
-	QueryPerformanceCounter(&t2);
-	printf("_runIntegrate: \t%9.3f ms\n",	(t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart); t1 = t2;
+		_runComputeAcceleration( queue ); queue.finish();	 QueryPerformanceCounter(&t2); printf("_runComputeAcceleration: \t%9.3f ms\n",		(t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart); t1 = t2;
 
-/*
-#else
+		_runIntegrate( queue ); queue.finish();	 QueryPerformanceCounter(&t2); printf("_runIntegrate: \t%9.3f ms\n",				(t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart); t1 = t2;
+	}
 
-	_testClearBuffers( queue );
-	_testHashParticles( queue );
-	_testSort( queue );
-	_testSortPostPass( queue );
-	_testIndexx( queue );
-	_testIndexPostPass( queue );
-	_testFindNeighbors( queue );
-	_testComputeDensityPressure( queue );
-	_testComputeAcceleration( queue );
-	_testIntegrate( queue );
+	// PCISPH
+	if(PCISPH==1)
+	{
+		// according to B. Solenthaler's dissertation, page 28
+		// we need to compute forces (all except pressure forces), initialize pressure and pressure forces with 0.0
+		// viscosity force needs density to be calculated preliminarily:
 
-#endif
-*/
+		_run_pcisph_computeDensity( queue ); queue.finish(); /*writeLog_neighbor_count();*/  //writeLog_density();
+		 
+		// compute forces F_viscous,gravity,external; initialize p(t)=0.0 and Fp(t)=0.0:
+		_run_pcisph_computeForcesAndInitPressure( queue ); queue.finish();// writeLog_accelerations();
+		 
+		// this is the main prediction-correction loop which works until rho_err_*_(t+1) > d_rho (~1%)
+		int iter = 0;
+		int maxIterations = 3;//3;
+		do
+		{
+			_run_pcisph_predictPositions(queue); queue.finish();	//writeLog_positions_pred();
+			_run_pcisph_predictDensity(queue); queue.finish();	//	writeLog_density_pred();
+			_run_pcisph_correctPressure(queue); queue.finish();		//writeLog_pressure();
+			_run_pcisph_computePressureForceAcceleration( queue ); queue.finish(); //writeLog_accelerations_p();
+
+			iter++;
+		}
+		while(iter<maxIterations);
+
+		// for all particles: compute new velocity v(t+1)
+		// for all particles: compute new position x(t+1)
+		_run_pcisph_integrate( queue ); queue.finish();	//writeLog_positions();
+
+		QueryPerformanceCounter(&t2); printf("_runPCISPH: \t\t%9.3f ms\n",	(t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart); t1 = t2;
+	}
+
+	
+
+	//...
+
+	// END OF PCISPH
+
 
 	//printf("enter <queue.enqueueReadBuffer>, line 700 at main.cpp\n");
 	err = queue.enqueueReadBuffer( position, CL_TRUE, 0, PARTICLE_COUNT * sizeof( float ) * 4, positionBuffer );
@@ -839,8 +1081,8 @@ void step()
 	queue.finish();
 
 	QueryPerformanceCounter(&t2);// stop timer
-	elapsedTime = (t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart;
-	printf("_readBuffer: \t\t\t%9.3f ms\n",elapsedTime);
+	elapsedTime = (t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart;  t1 = t2;
+	printf("_readBuffer: \t\t%9.3f ms\n",elapsedTime);
 
 	//It should be removed after fixing
 	/**/err = queue.enqueueReadBuffer( neighborMap, CL_TRUE, 0, ( NK * sizeof( float ) * 2 ), neighborMapBuffer );
@@ -850,8 +1092,8 @@ void step()
 	queue.finish();
 
 	QueryPerformanceCounter(&t2);// stop timer
-	elapsedTime = (t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart;
-	printf("_readBuffer: \t\t\t%9.3f ms\n",elapsedTime);/**/
+	elapsedTime = (t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart;  t1 = t2;
+	printf("_readBuffer: \t\t%9.3f ms\n",elapsedTime);/**/
 
 	/**/err = queue.enqueueReadBuffer( particleIndex, CL_TRUE, 0, ( PARTICLE_COUNT * sizeof( unsigned int ) * 2 ),  particleIndexBuffer);
 	if( err != CL_SUCCESS ){
@@ -860,14 +1102,14 @@ void step()
 	queue.finish();
 
 	QueryPerformanceCounter(&t2);// stop timer
-	elapsedTime = (t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart;
-	printf("_readBuffer: \t\t\t%9.3f ms\n",elapsedTime);/**/
+	elapsedTime = (t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart;  t1 = t2;
+	printf("_readBuffer: \t\t%9.3f ms\n",elapsedTime);/**/
 
 
-	elapsedTime = (t2.QuadPart - t0.QuadPart) * 1000.0 / frequency.QuadPart;
-	printf("===============================\n");
-	printf("_Total_step_time:\t\t%9.3f ms\n",elapsedTime);
-	printf("");
+	elapsedTime = (t2.QuadPart - t0.QuadPart) * 1000.0 / frequency.QuadPart;  
+	printf("------------------------------------\n");
+	printf("_Total_step_time:\t%9.3f ms\n",elapsedTime);
+	printf("====================================\n");
 }
 
 
@@ -973,8 +1215,11 @@ void initializeOpenCL(
 
 	program = cl::Program( context, source );   
 //#ifdef NDEBUG
-/*work*///	err = program.build( devices, "-g -s \"E:\\Distrib\\_OpenWorm related soft\\SPH\\SphFluid_CLGL_original_highlight_neiborhood\\sphFluidDemo.cl\"" );
-/*home*/// err = program.build( devices,"-g -s \"C:\\Users\\Sergey\\Desktop\\SphFluid_CLGL_myNeighborhoodSearch_12may2012\\sphFluidDemo.cl\"" );
+	//E:\Distrib\_OpenWorm related soft\Smoothed-Particle-Hydrodynamics
+/*work*/  //	err = program.build( devices, "-g -s \"E:\\Distrib\\_OpenWorm related soft\\Smoothed-Particle-Hydrodynamics\\sphFluidDemo.cl\"" );
+/*homeS*/ // err = program.build( devices,"-g -s \"C:\\Users\\Sergey\\Desktop\\SphFluid_CLGL_myNeighborhoodSearch_12may2012\\sphFluidDemo.cl\"" );
+/*homeA*/ //   err = program.build( devices, "-g -s \"D:\\_OpenWorm\\SphFluid_CLGL_original_32nearest_PCI\\sphFluidDemo.cl\"" );
+	//D:\_OpenWorm\SphFluid_CLGL_original_32nearest_PCI
 /*#else*/
 	//err = program.build( devices, "-g" );
 	err = program.build( devices, "" );
@@ -993,14 +1238,13 @@ void initializeOpenCL(
 int sph_fluid_main_start ( /*int argc, char **argv*/ )
 {
 	int err;
-	positionBuffer = new float[ 4 * PARTICLE_COUNT ];
+	positionBuffer = new float[ 8 * PARTICLE_COUNT ];
 	velocityBuffer = new float[ 4 * PARTICLE_COUNT ];
 
 
 
 	neighborMapBuffer = new float[( NK * sizeof( float ) * 2 )];
 	particleIndexBuffer = new unsigned int[PARTICLE_COUNT * 2];
-	//preInitDX10( PARTICLE_COUNT, positionBuffer );
 
 	try{
 
@@ -1019,7 +1263,7 @@ int sph_fluid_main_start ( /*int argc, char **argv*/ )
 		gridCellsZ = (int)( ( ZMAX - ZMIN ) / h ) + 1;
 		gridCellCount = gridCellsX * gridCellsY * gridCellsZ;
 
-		acceleration = cl::Buffer( context, CL_MEM_READ_WRITE, ( PARTICLE_COUNT * sizeof( float ) * 4 ), NULL, &err );
+		acceleration = cl::Buffer( context, CL_MEM_READ_WRITE, ( PARTICLE_COUNT * sizeof( float ) * 4 * 2 ), NULL, &err );
 		if( err != CL_SUCCESS ){
 			throw std::runtime_error( "buffer acceleration creation failed" );
 		}
@@ -1039,6 +1283,10 @@ int sph_fluid_main_start ( /*int argc, char **argv*/ )
 		if( err != CL_SUCCESS ){
 			throw std::runtime_error( "buffer particleIndex creation failed" );
 		}
+		particleIndexBack = cl::Buffer( context, CL_MEM_READ_WRITE, ( PARTICLE_COUNT * sizeof( unsigned int ) ), NULL, &err );
+		if( err != CL_SUCCESS ){
+			throw std::runtime_error( "buffer particleIndexBack creation failed" );
+		}
 		position = cl::Buffer( context, CL_MEM_READ_WRITE, ( PARTICLE_COUNT * sizeof( float ) * 4 ), NULL, &err );
 		if( err != CL_SUCCESS ){
 			throw std::runtime_error( "buffer position creation failed" );
@@ -1047,15 +1295,15 @@ int sph_fluid_main_start ( /*int argc, char **argv*/ )
 		if( err != CL_SUCCESS ){
 			throw std::runtime_error( "buffer pressure creation failed" );
 		}
-		rho = cl::Buffer( context, CL_MEM_READ_WRITE, ( PARTICLE_COUNT * sizeof( float ) * 1 ), NULL, &err );
+		rho = cl::Buffer( context, CL_MEM_READ_WRITE, ( PARTICLE_COUNT * sizeof( float ) * 2 ), NULL, &err );
 		if( err != CL_SUCCESS ){
 			throw std::runtime_error( "buffer rho creation failed" );
 		}
-		rhoInv = cl::Buffer( context, CL_MEM_READ_WRITE, ( PARTICLE_COUNT * sizeof( float ) * 1 ), NULL, &err );
+		rhoInv = cl::Buffer( context, CL_MEM_READ_WRITE, ( PARTICLE_COUNT * sizeof( float ) ), NULL, &err );
 		if( err != CL_SUCCESS ){
 			throw std::runtime_error( "buffer rhoInv creation failed" );
 		}
-		sortedPosition = cl::Buffer( context, CL_MEM_READ_WRITE, ( PARTICLE_COUNT * sizeof( float ) * 4 ), NULL, &err );
+		sortedPosition = cl::Buffer( context, CL_MEM_READ_WRITE, ( PARTICLE_COUNT * sizeof( float ) * 4 * 2 ), NULL, &err );
 		if( err != CL_SUCCESS ){
 			throw std::runtime_error( "buffer sortedPosition creation failed" );
 		}
@@ -1105,8 +1353,45 @@ int sph_fluid_main_start ( /*int argc, char **argv*/ )
 		if( err != CL_SUCCESS ){
 			throw std::runtime_error( "kernel sortPostPass creation failed" );
 		}
+		// additional, PCISPH
+		pcisph_computeForcesAndInitPressure = cl::Kernel( program, "pcisph_computeForcesAndInitPressure", &err );
+		if( err != CL_SUCCESS ){
+			throw std::runtime_error( "kernel pcisph_computeForcesAndInitPressure creation failed" );
+		}
+
+		pcisph_integrate = cl::Kernel( program, "pcisph_integrate", &err );
+		if( err != CL_SUCCESS ){
+			throw std::runtime_error( "kernel pcisph_integrate creation failed" );
+		}
+
+		pcisph_predictPositions = cl::Kernel( program, "pcisph_predictPositions", &err );
+		if( err != CL_SUCCESS ){
+			throw std::runtime_error( "kernel pcisph_predictPositions creation failed" );
+		}
+
+		pcisph_predictDensity = cl::Kernel( program, "pcisph_predictDensity", &err );
+		if( err != CL_SUCCESS ){
+			throw std::runtime_error( "kernel pcisph_predictDensity creation failed" );
+		}
+
+		pcisph_correctPressure = cl::Kernel( program, "pcisph_correctPressure", &err );
+		if( err != CL_SUCCESS ){
+			throw std::runtime_error( "kernel pcisph_correctPressure creation failed" );
+		}
+
+		pcisph_computePressureForceAcceleration = cl::Kernel( program, "pcisph_computePressureForceAcceleration", &err );
+		if( err != CL_SUCCESS ){
+			throw std::runtime_error( "kernel pcisph_computePressureForceAcceleration creation failed" );
+		}
+
+		pcisph_computeDensity = cl::Kernel( program, "pcisph_computeDensity", &err );
+		if( err != CL_SUCCESS ){
+			throw std::runtime_error( "kernel pcisph_computeDensity creation failed" );
+		}
 
 
+
+/*
 		for( int i = 0; i < PARTICLE_COUNT; ++i ){
 			float x, y, z;
 			float r;
@@ -1130,7 +1415,41 @@ int sph_fluid_main_start ( /*int argc, char **argv*/ )
 			r = ( (float)rand() / (float)RAND_MAX );
 			velocityVector[ 2 ] = SCALE( -1.0f, 1.0f, r );
 			velocityVector[ 3 ] = 0;
+
 		}//for
+		
+		/**/
+
+		
+		float x,y,z;
+
+		float coeff = 1.9f;//2.5//1.7
+		//float cGrad = 1.0;
+
+		x = 0*XMAX/4+h/(2*coeff);
+		y = h/(2*coeff);
+		z = h/(2*coeff);
+
+		for( int i = 0; i < PARTICLE_COUNT; ++i )
+		{
+			float * positionVector = positionBuffer + 4 * i;
+			positionVector[ 0 ] = x;
+			positionVector[ 1 ] = y;
+			positionVector[ 2 ] = z;
+			positionVector[ 3 ] = 0;
+
+			float * velocityVector = velocityBuffer + 4 * i;
+			velocityVector[ 0 ] = 0;
+			velocityVector[ 1 ] = 0;
+			velocityVector[ 2 ] = 0;
+			velocityVector[ 3 ] = 0;
+
+			x+= h/coeff;
+
+			if(x>XMAX*3/8) { x = 0*XMAX/4+h/(2*coeff); z += h/coeff; }
+			if(z>ZMAX) { x = 0*XMAX/4+h/(2*coeff); z=h/(2*coeff); y += h/coeff; }
+		}
+		
 
 		err = queue.enqueueWriteBuffer( position, CL_TRUE, 0, PARTICLE_COUNT * sizeof( float ) * 4, positionBuffer );
 		if( err != CL_SUCCESS ){
@@ -1176,11 +1495,11 @@ extern int frames_counter;
 void sph_fluid_main_step ()
 {
 	int c = clock();
-	int work_time;
+//	int work_time;
 	nIter++;
 	printf("\n[[ Step %d ]]",nIter);
 	//printf("\n[[ Step %d ]], OpenGL_frames: %d",nIter,frames_counter);
-	step();
+	step(nIter);
 	//printf("\nsph_fluid_main_step:%d\n",clock() - c);
 }
 
@@ -1188,4 +1507,6 @@ void sph_fluid_main_stop ()
 {
 	delete [] positionBuffer;
 	delete [] velocityBuffer;
+	delete [] neighborMapBuffer;
+	delete [] particleIndexBuffer;
 }

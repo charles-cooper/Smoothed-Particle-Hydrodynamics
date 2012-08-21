@@ -20,7 +20,7 @@ float rotX = 0.0f;    // Rotate screen on x axis
 float rotY = 0.0f;    // Rotate screen on y axis
 float rotZ = 0.0f;    // Rotate screen on z axis
 bool lbutton = false;
-float sc = 0.04;
+float sc = 0.03;//0.045;//0.07
 Vector3D ort1(1,0,0),ort2(0,1,0),ort3(0,0,1);
 //bool mouse_event = false; // need to reDraw
 //extern int particleCount;
@@ -34,7 +34,7 @@ extern int sph_fluid_main_start ();
 extern void sph_fluid_main_step ();
 extern void sph_fluid_main_stop ();
 
-int pId = 1234;
+int pId = 123;//1021;//1234
  
 GLvoid display(GLvoid)
 {
@@ -94,8 +94,9 @@ GLvoid display(GLvoid)
 	v7 = Vector3D(  XMAX/2,  YMAX/2,  ZMAX/2)*sc;
 	v8 = Vector3D( -XMAX/2,  YMAX/2,  ZMAX/2)*sc;
 
-	glColor3ub(255,0,0);//red
-	glVertex3d(v1.x,v1.y,v1.z); glColor3ub(255,255,0);//yellow
+	//glColor3ub(255,0,0);//red
+	glColor3ub(255,255,255);//yellow
+	glVertex3d(v1.x,v1.y,v1.z); 
 	glVertex3d(v2.x,v2.y,v2.z);
 
 	glVertex3d(v2.x,v2.y,v2.z);
@@ -133,6 +134,18 @@ GLvoid display(GLvoid)
 	glVertex3d(v5.x,v5.y,v5.z);
 	
 	glEnd();
+
+	glColor3ub(255,0,255);//yellow
+	//glRectf(-3,-3,3,3);
+	/*float cf = 2.0;
+	
+	glBegin(GL_QUADS);
+	glColor3ub(100,100,100); glVertex3d(cf*v5.x,cf*v5.y,cf*v5.z);
+	glColor3ub(100,100,100); glVertex3d(cf*v6.x,cf*v6.y,cf*v6.z);
+	glColor3ub(200,200,200); glVertex3d(cf*v7.x,cf*v7.y,cf*v7.z);
+	glColor3ub(200,200,200); glVertex3d(cf*v8.x,cf*v8.y,cf*v8.z);
+	glEnd();
+	*/
 /*
     GLfloat material_diffuse[] = {1.0, 1.0, 1.0, 1.0};
     glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, material_diffuse);
@@ -157,14 +170,39 @@ GLvoid display(GLvoid)
 	}
 	fclose(f2);*/
 
-	glColor3ub(75, 135, 195);
+	//glColor3ub(75, 135, 195);
+
+	int pib;
+
+	for(int i=0;i<PARTICLE_COUNT;i++)
+	{
+		pib = particleIndexBuffer[2*i + 1];
+		particleIndexBuffer[2*pib + 0] = i;
+	}
+/*	
+	int pib;
+	float x,y,z;
 	
-	for(int i=0;i<PARTICLE_COUNT;i++){
-		if(pId == particleIndexBuffer[2*i + 1]){
+	for(int i=0;i<PARTICLE_COUNT;i++)
+	{
+		pib = particleIndexBuffer[2*i + 1];
+		x = positionBuffer[i*4];
+		y = positionBuffer[i*4+1];
+		z = positionBuffer[i*4+2];
+
+		if(y>1.0f)
+		{
+			y += 0.f;
+		}
+		/
+		if(pId == particleIndexBuffer[2*i + 1])
+		{
 			pId = i;
 			break;
 		}
+		/
 	}
+*/	
 	Vector3D v;
 	
 	
@@ -172,12 +210,41 @@ GLvoid display(GLvoid)
 	//float distrib[301];
 	//for(int j=0;j<301;j++) distrib[j] = 0;
 	//glPushMatrix();
-	glBegin(GL_POINTS);
+	
 	glColor3f(1.0,1.0,1.0);
-	glPointSize(1.f);
+	glPointSize(3.f);
+	float rho;
+	float rho0 = 1000;
+	glBegin(GL_POINTS);
+	float dc;
+
 	//glEnable(GL_POINT_SMOOTH);
 	for(int i = 0; i<PARTICLE_COUNT; i++)
 	{
+		rho = positionBuffer[i*4+3];
+		if(rho<0) rho=0;
+		if(rho>2*rho0) rho=2*rho0;
+
+		//if(rho>rho0) glColor3f(1.0,1.0,1.0-50*(rho-rho0)/rho0);
+		//if(rho<rho0) glColor3f(1.0-50*(rho0-rho)/rho0,1.0,1.0);
+		dc = 100.0*(rho-rho0)/rho0;
+		if(dc>1.f) dc = 1.f;
+
+		// R G B
+		// 0 0 1 blue
+		// 0 1 1 cyan
+		// 0 1 0 grean
+		// 1 1 0 yellow
+		// 1 0 0 red
+									//  R   G   B
+							glColor3f(  0,  0,  1);//blue
+		if( (dc=100*(rho-rho0*1.00f)/rho0) >0 )	glColor3f(  0, dc,  1);//cyan
+		if( (dc=100*(rho-rho0*1.01f)/rho0) >0 )	glColor3f(  0,  1,1-dc);//green
+		if( (dc=100*(rho-rho0*1.02f)/rho0) >0 )	glColor3f(  dc, 1,  0);//yellow
+		if( (dc=100*(rho-rho0*1.03f)/rho0) >0 )	glColor3f(  1,1-dc, 0);//red
+		if( (dc=100*(rho-rho0*1.04f)/rho0) >0 )	glColor3f(  1,  0,  0);
+		//if(rho>rho0*1.01f) glColor3f(1.0,0.5,0.0);
+
 		//GLfloat vert[] = {0.f,0.f,0.f};
 		glPushMatrix();
 		//glVertex3fv(vert);
@@ -192,42 +259,68 @@ GLvoid display(GLvoid)
 	glEnd();
 
 
-	//
-	/**///glBegin(GL_POINTS);
-	
+	glColor3f(1.0,0.0,1.0);
 	glPointSize(1.f);
 
-	glColor3f(1.0,0.0,0.0);
+	//int id_source_particle;
+	//id_source_particle = particleIndexBuffer[pId*2+1];
 
-	float x,y,z;
-	/**/
-	for(int id = 0; id<NEIGHBOR_COUNT*2; id+=2)
+	int pId_in_sortedPos = particleIndexBuffer[pId*2+0];
+
+	int i,j;
+
+	for(i=0;i<PARTICLE_COUNT;i++)
 	{
-		int i = (int)neighborMapBuffer[pId * NEIGHBOR_COUNT * 2 + id];
+		pId_in_sortedPos = particleIndexBuffer[i*2+0];
+		int id;
 
-		if(i >=0 )
+		for(j=0;i<PARTICLE_COUNT;i++)
 		{
-			glPushMatrix();
-			//GLfloat vert[] = {0.f,0.f,0.f};
-			//glVertex3fv(vert);
-			x = (positionBuffer[i*4]-XMAX/2)*sc;
-			y = (positionBuffer[i*4+1]-XMAX/2)*sc;
-			z = (positionBuffer[i*4+2]-XMAX/2)*sc;
-			glTranslated( (positionBuffer[i*4]-XMAX/2)*sc , (positionBuffer[i*4+1]-YMAX/2)*sc, (positionBuffer[i*4+2]-ZMAX/2)*sc );
-			
-			
-			glutSolidSphere( 0.2*sc, 4, 2 );
+			 id = (int)neighborMapBuffer[pId_in_sortedPos * NEIGHBOR_COUNT * 2 + j*2 + 0];
 
-			//glVertex3f((positionBuffer[i*4]-XMAX/2)*sc , (positionBuffer[i*4+1]-YMAX/2)*sc, (positionBuffer[i*4+2]-ZMAX/2)*sc );
-			glPopMatrix();
+		}
+	}
+
+	pId_in_sortedPos = particleIndexBuffer[pId*2+0];
+
+	for(i = 0; i<NEIGHBOR_COUNT; i++)
+	{
+		int id  = (int)neighborMapBuffer[pId_in_sortedPos * NEIGHBOR_COUNT * 2 + i*2 + 0];
+		//int id1 = (int)neighborMapBuffer[pId * NEIGHBOR_COUNT * 2 + i*2 + 1];
+		
+
+
+		if(id>=0)
+		{
+			//id_source_particle = particleIndexBuffer[i*2+1];
+			//i = id_source_particle;
+
+			id =  particleIndexBuffer[id*2+1];
+			//int id1 = particleIndexBuffer[id*2+0];
+			
+			if(id >= 0)
+			{
+				glPushMatrix();
+				glTranslated( (positionBuffer[id*4]-XMAX/2)*sc , (positionBuffer[id*4+1]-YMAX/2)*sc, (positionBuffer[id*4+2]-ZMAX/2)*sc );
+				glutSolidSphere( 0.2*sc, 4, 2 );
+
+				//glVertex3f((positionBuffer[i*4]-XMAX/2)*sc , (positionBuffer[i*4+1]-YMAX/2)*sc, (positionBuffer[i*4+2]-ZMAX/2)*sc );
+				glPopMatrix();
+			}
 		}
 	}/**/
-	//glEnd();
 
 
 	glColor3f(0.0,0.0,0.0);
-    int i = pId;
+    i = pId;
+	int idSortedPos = particleIndexBuffer[pId*2+1];
+	idSortedPos = particleIndexBuffer[pId*2+0];
 	glPushMatrix();
+	float x,y,z;
+	x = positionBuffer[i*4];
+	y = positionBuffer[i*4+1];
+	z = positionBuffer[i*4+2];
+
 	glTranslated( (positionBuffer[i*4]-XMAX/2)*sc , (positionBuffer[i*4+1]-YMAX/2)*sc, (positionBuffer[i*4+2]-ZMAX/2)*sc );
 	glutSolidSphere( 0.2*sc, 4, 2 );
 	glPopMatrix();
@@ -314,7 +407,7 @@ void respond_mouse(int button, int state, int x, int y)
 //    called on mouse movement
 void mouse_motion (int x, int y) 
 {
-	//if(lbutton)
+	if(lbutton)
 	{
 		int rx,ry;
 
@@ -326,16 +419,18 @@ void mouse_motion (int x, int y)
 		
 		if(rx)
 		{
-			ort1 = Vector3D::RotateVector1AroundVector2(ort1,Vector3D(0,1,0),rx);
-			ort2 = Vector3D::RotateVector1AroundVector2(ort2,Vector3D(0,1,0),rx);
-			ort3 = Vector3D::RotateVector1AroundVector2(ort3,Vector3D(0,1,0),rx);
+			rotX += rx;
+			glRotatef(rx, 0.0, 1.0, 0.0);          
+			//ort1 = Vector3D::RotateVector1AroundVector2(ort1,Vector3D(0,1,0),rx);
+			//ort2 = Vector3D::RotateVector1AroundVector2(ort2,Vector3D(0,1,0),rx);
+			//ort3 = Vector3D::RotateVector1AroundVector2(ort3,Vector3D(0,1,0),rx);
 		}
 		
 		if(ry)
 		{
-			ort1 = Vector3D::RotateVector1AroundVector2(ort1,Vector3D(0,0,1),ry);
-			ort2 = Vector3D::RotateVector1AroundVector2(ort2,Vector3D(0,0,1),ry);
-			ort3 = Vector3D::RotateVector1AroundVector2(ort3,Vector3D(0,0,1),ry);
+			//ort1 = Vector3D::RotateVector1AroundVector2(ort1,Vector3D(0,0,1),ry);
+			//ort2 = Vector3D::RotateVector1AroundVector2(ort2,Vector3D(0,0,1),ry);
+			//ort3 = Vector3D::RotateVector1AroundVector2(ort3,Vector3D(0,0,1),ry);
 		}
 	}
 }
@@ -366,7 +461,7 @@ int main(int argc, char** argv)
     glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB);
     glutInitWindowSize(800, 600);
     glutInitWindowPosition(100, 100);
-	glutCreateWindow("Palyanov Andrey for OpenWorm: OpenCL SPH fluid + OpenGL(GLUT) visualization [2012]");
+	glutCreateWindow("Palyanov Andrey for OpenWorm: OpenCL PCISPH fluid demo [2012]");
 	
     /*
     glClearColor (0.3, 0.3, 0.3, 0.0); // цвет фона
