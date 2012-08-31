@@ -20,7 +20,7 @@ float rotX = 0.0f;    // Rotate screen on x axis
 float rotY = 0.0f;    // Rotate screen on y axis
 float rotZ = 0.0f;    // Rotate screen on z axis
 bool lbutton = false;
-float sc = 0.03;//0.045;//0.07
+float sc = 0.044;//0.045;//0.07
 Vector3D ort1(1,0,0),ort2(0,1,0),ort3(0,0,1);
 //bool mouse_event = false; // need to reDraw
 //extern int particleCount;
@@ -38,6 +38,12 @@ int pId = 123;//1021;//1234
  
 GLvoid display(GLvoid)
 {
+
+	LARGE_INTEGER frequency;				// ticks per second
+    LARGE_INTEGER t1, t2;					// ticks
+    QueryPerformanceFrequency(&frequency);	// get ticks per second
+    QueryPerformanceCounter(&t1);			// start timer
+
 	frames_counter++;
 	int c = clock();
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);	// Очищается буфер кадра и буфер глубины
@@ -211,7 +217,7 @@ GLvoid display(GLvoid)
 	//for(int j=0;j<301;j++) distrib[j] = 0;
 	//glPushMatrix();
 	
-	glColor3f(1.0,1.0,1.0);
+	//glColor3f(0.2,0.5,0.7);
 	glPointSize(3.f);
 	float rho;
 	float rho0 = 1000;
@@ -237,12 +243,12 @@ GLvoid display(GLvoid)
 		// 1 1 0 yellow
 		// 1 0 0 red
 									//  R   G   B
-							glColor3f(  0,  0,  1);//blue
-		if( (dc=100*(rho-rho0*1.00f)/rho0) >0 )	glColor3f(  0, dc,  1);//cyan
-		if( (dc=100*(rho-rho0*1.01f)/rho0) >0 )	glColor3f(  0,  1,1-dc);//green
-		if( (dc=100*(rho-rho0*1.02f)/rho0) >0 )	glColor3f(  dc, 1,  0);//yellow
-		if( (dc=100*(rho-rho0*1.03f)/rho0) >0 )	glColor3f(  1,1-dc, 0);//red
-		if( (dc=100*(rho-rho0*1.04f)/rho0) >0 )	glColor3f(  1,  0,  0);
+							glColor4f(  0,  0,  1, 1.0f);//blue
+		if( (dc=100*(rho-rho0*1.00f)/rho0) >0 )	glColor4f(   0,  dc,   1,1.0f);//cyan
+		if( (dc=100*(rho-rho0*1.01f)/rho0) >0 )	glColor4f(   0,   1,1-dc,1.0f);//green
+		if( (dc=100*(rho-rho0*1.02f)/rho0) >0 )	glColor4f(  dc,   1,   0,1.0f);//yellow
+		if( (dc=100*(rho-rho0*1.03f)/rho0) >0 )	glColor4f(   1,1-dc,   0,1.0f);//red
+		if( (dc=100*(rho-rho0*1.04f)/rho0) >0 )	glColor4f(   1,   0,   0,1.0f);
 		//if(rho>rho0*1.01f) glColor3f(1.0,0.5,0.0);
 
 		//GLfloat vert[] = {0.f,0.f,0.f};
@@ -252,7 +258,7 @@ GLvoid display(GLvoid)
 		//distrib[(int)(positionBuffer[i*4]*300/XMAX)]+=1.f;
 		//glutWireSphere( 1.0, 8, 8 );
 		glVertex3f((positionBuffer[i*4]-XMAX/2)*sc , (positionBuffer[i*4+1]-YMAX/2)*sc, (positionBuffer[i*4+2]-ZMAX/2)*sc );
-//		glutSolidSphere( 0.3*sc, 4, 2 );
+		//glutSolidSphere( 0.3*sc, 6, 6 );
 
 		glPopMatrix();
 	}
@@ -281,6 +287,7 @@ GLvoid display(GLvoid)
 		}
 	}
 
+	/*
 	pId_in_sortedPos = particleIndexBuffer[pId*2+0];
 
 	for(i = 0; i<NEIGHBOR_COUNT; i++)
@@ -302,13 +309,13 @@ GLvoid display(GLvoid)
 			{
 				glPushMatrix();
 				glTranslated( (positionBuffer[id*4]-XMAX/2)*sc , (positionBuffer[id*4+1]-YMAX/2)*sc, (positionBuffer[id*4+2]-ZMAX/2)*sc );
-				glutSolidSphere( 0.2*sc, 4, 2 );
+				glutSolidSphere( 0.32*sc, 6, 6 );
 
 				//glVertex3f((positionBuffer[i*4]-XMAX/2)*sc , (positionBuffer[i*4+1]-YMAX/2)*sc, (positionBuffer[i*4+2]-ZMAX/2)*sc );
 				glPopMatrix();
 			}
 		}
-	}/**/
+	}
 
 
 	glColor3f(0.0,0.0,0.0);
@@ -322,12 +329,12 @@ GLvoid display(GLvoid)
 	z = positionBuffer[i*4+2];
 
 	glTranslated( (positionBuffer[i*4]-XMAX/2)*sc , (positionBuffer[i*4+1]-YMAX/2)*sc, (positionBuffer[i*4+2]-ZMAX/2)*sc );
-	glutSolidSphere( 0.2*sc, 4, 2 );
+	glutSolidSphere( 0.31*sc, 6, 6 );
 	glPopMatrix();
 
 
      glEnd();
-	//
+	*/
 
 	
 
@@ -345,6 +352,9 @@ GLvoid display(GLvoid)
 
     glutSwapBuffers();
 	//printf("\ntime:%d",clock()-c);
+
+	QueryPerformanceCounter(&t2); 
+	printf("graphics: \t\t%9.3f ms\n====================================\n",	(t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart);
 }
  
 GLvoid reshape(GLsizei width, GLsizei height)
@@ -439,18 +449,12 @@ void mouse_motion (int x, int y)
 
 void Timer(int value)
 {
-	int c = clock();
-	int work_time;
 	sph_fluid_main_step();
+
 	// Re-register for next callback
-	//c = clock();
     glutTimerFunc(TIMER_INTERVAL*0, Timer, 0);
-	//work_time = clock() - c;
-	//printf("glutTimerFunc work:%d\n",work_time);
-	//c = clock();
 	glutPostRedisplay();
-	//work_time = clock() - c;
-	//printf("glutPostRedisplay work:%d\n",work_time);
+
 }
 
 

@@ -50,11 +50,11 @@ const float stiffness = 0.75f;
 const float h = 3.34f;
 const float hashGridCellSize = 2.0f * h;
 const float hashGridCellSizeInv = 1.0f / hashGridCellSize;
-const float mass = 0.0003f;//0.001
+const float mass = 0.0003f;//0.0003
 const float simulationScale = 0.004f;
 const float simulationScaleInv = 1.0f / simulationScale;
 const float mu = 10.0f;//why this value? Dynamic viscosity of water at 25 C = 0.89e-3 Pa*s
-const float timeStep = 0.0005;//0.0042f;
+const float timeStep = 0.0005f;//0.0042f;
 const float CFLLimit = 100.0f;
 const int NK = NEIGHBOR_COUNT * PARTICLE_COUNT;
 const float damping = 0.75f;
@@ -134,6 +134,7 @@ float * velocityBuffer;
 //Delete This After Fixing
 float * neighborMapBuffer;
 unsigned int * particleIndexBuffer;
+unsigned int * gridNextNonEmptyCellBuffer;
 
 cl::Context context;
 std::vector< cl::Device > devices;
@@ -161,7 +162,6 @@ cl::Kernel computeAcceleration;
 cl::Kernel computeDensityPressure;
 cl::Kernel findNeighbors;
 cl::Kernel hashParticles;
-cl::Kernel indexPostPass;
 cl::Kernel indexx;
 cl::Kernel integrate;
 cl::Kernel sortPostPass;
@@ -435,56 +435,31 @@ _runHashParticles( cl::CommandQueue queue ){
 
 
 unsigned int
-_runIndexPostPass( cl::CommandQueue queue ){
+_runIndexPostPass( ){
 	// Stage IndexPostPass
-	indexPostPass.setArg( 0, gridCellIndex );
-	gridCellCount = ((gridCellsX) * (gridCellsY)) * (gridCellsZ);
-	indexPostPass.setArg( 1, gridCellCount );
-	indexPostPass.setArg( 2, gridCellIndexFixedUp );
-	int gridCellCountRoundedUp = ((( gridCellCount - 1 ) / 256 ) + 1 ) * 256;
-	queue.enqueueNDRangeKernel(
-		indexPostPass, cl::NullRange, cl::NDRange( (int) ( gridCellCountRoundedUp ) ),
-#if defined( __APPLE__ )
-		cl::NullRange, NULL, NULL );
-#else
-		cl::NDRange( (int)( 256 ) ), NULL, NULL );
-#endif
-#ifdef QUEUE_EACH_KERNEL
-	queue.finish();
-#endif
-	/*queue.finish();
 
-	unsigned int  * _gridCellIndex = new unsigned int[ ( gridCellCount + 1 ) ];
-	queue.enqueueReadBuffer( gridCellIndex, CL_TRUE, 0, ( ( gridCellCount + 1 ) * sizeof( unsigned int ) * 1 ), _gridCellIndex );
+	//28aug_Palyanov_start_block
+	int err;
+	err = queue.enqueueReadBuffer( gridCellIndex, CL_TRUE, 0, (gridCellCount+1) * sizeof( unsigned int ) * 1, gridNextNonEmptyCellBuffer );
+	if( err != CL_SUCCESS ){ throw std::runtime_error( "could not enqueue gridCellIndex read" ); } 
 	queue.finish();
-	FILE *f1 = fopen("boxes_p.txt","wt");
-	for(int id=0;id<( gridCellCount + 1 );id++) 
-	{
-		fprintf(f1,"%d\n",_gridCellIndex[id]);
-	}
-	fclose(f1);
 
+	int recentNonEmptyCell = gridCellCount;
+	for(int i=gridCellCount;i>=0;i--)
+	{
+		if(gridNextNonEmptyCellBuffer[i]==NO_CELL_ID)
+			gridNextNonEmptyCellBuffer[i] = recentNonEmptyCell; 
+		else recentNonEmptyCell = gridNextNonEmptyCellBuffer[i];
+	}
 
-	unsigned int  * _gridCellIndexFixedUp = new unsigned int[ ( gridCellCount + 1 ) ];
-	queue.enqueueReadBuffer( gridCellIndexFixedUp, CL_TRUE, 0, ( ( gridCellCount + 1 ) * sizeof( unsigned int ) * 1 ), _gridCellIndexFixedUp );
+	err = queue.enqueueWriteBuffer( gridCellIndexFixedUp, CL_TRUE, 0, (gridCellCount+1) * sizeof( unsigned int ) * 1, gridNextNonEmptyCellBuffer );
+	//err = queue.enqueueWriteBuffer( gridNextNonEmptyCell, CL_TRUE, 0, (gridCellCount+1) * sizeof( unsigned int ) * 1, gridNextNonEmptyCellBuffer );
+	if( err != CL_SUCCESS ){ throw std::runtime_error( "could not enqueue ??? write" ); }
 	queue.finish();
-	FILE *f = fopen("boxes_t.txt","wt");
-	for(int id=0;id<( gridCellCount + 1 );id++) 
-	{
-		fprintf(f,"%d\n",_gridCellIndexFixedUp[id]);
-	}
-	fclose(f);
-	*//*
-	unsigned int  * _particleIndex = new unsigned int[ PARTICLE_COUNT * 2 ];
-	queue.enqueueReadBuffer( particleIndex, CL_TRUE, 0, ( PARTICLE_COUNT * 2 * sizeof( unsigned int ) ), _particleIndex );
-	queue.finish();
-	FILE *f2 = fopen("particleIndex.txt","wt");
-	for(int id=0;id<( PARTICLE_COUNT * 2 );id+=2) 
-	{
-		fprintf(f2,"%d\t",_particleIndex[id]);
-		fprintf(f2,"%d\n",_particleIndex[id+1]);
-	}
-	fclose(f2);*/
+
+	//_runIndexPostPass( queue ); queue.finish();// no need for this slow shit anymoar =)
+	// for details look at what happens with gridNextNonEmptyCellBuffer
+	//28aug_Palyanov_end_block
 
 	return 0;
 }
@@ -695,7 +670,7 @@ _run_pcisph_computeForcesAndInitPressure( cl::CommandQueue queue ){
 	pcisph_computeForcesAndInitPressure.setArg( 4, sortedVelocity );
 	pcisph_computeForcesAndInitPressure.setArg( 5, acceleration );
 	pcisph_computeForcesAndInitPressure.setArg( 6, particleIndexBack );
-	pcisph_computeForcesAndInitPressure.setArg( 7, gradWspikyCoefficient );
+	pcisph_computeForcesAndInitPressure.setArg( 7, Wpoly6Coefficient );
 	pcisph_computeForcesAndInitPressure.setArg( 8, del2WviscosityCoefficient );
 	pcisph_computeForcesAndInitPressure.setArg( 9, h );
 	pcisph_computeForcesAndInitPressure.setArg(10, mass );
@@ -828,22 +803,38 @@ void writeLog_neighbor_count()
 
 }
 
-void writeLog_density_pred()
+void writeLog_density_pred(int n_iter)
 {
 	int err;
+	float aver_density = 0;
+	float max_density = 0;
+	float min_density = rho0;
 
 	err = queue.enqueueReadBuffer( rho, CL_TRUE, 0, PARTICLE_COUNT * sizeof( float ) * 2, positionBuffer );
 	if( err != CL_SUCCESS ){
 		throw std::runtime_error( "could not enqueue read" );
 	}
 	queue.finish();
+	
 
-	FILE* flog = fopen("density.txt","wt");
 	for(int i=0;i<PARTICLE_COUNT;i++)
+	{
+		aver_density += ((float)positionBuffer[i+PARTICLE_COUNT])/((float)PARTICLE_COUNT);
+		max_density = max(max_density,(float)positionBuffer[i+PARTICLE_COUNT]);
+		min_density = min(min_density,(float)positionBuffer[i+PARTICLE_COUNT]);
+	}
+
+
+
+	FILE* flog = fopen("density.txt","a+");
+	/*for(int i=0;i<PARTICLE_COUNT;i++)
 	{
 		fprintf(flog,"%e\t",(float)positionBuffer[i+PARTICLE_COUNT]);
 	}
-	fprintf(flog,"\n");
+	fprintf(flog,"\n");*/
+
+	fprintf(flog,"%d\t%e\t%e\t%e\n",n_iter,max_density,aver_density,min_density);
+
 	fclose(flog);
 
 }
@@ -993,12 +984,37 @@ void writeLog_pressure()
 
 }
 
+float getDensityError(int n_iter)
+{
+	int err;
+	float aver_density = 0;
+	float max_density = 0;
+	float min_density = rho0;
+//	float density;
+
+	err = queue.enqueueReadBuffer( rho, CL_TRUE, 0, PARTICLE_COUNT * sizeof( float ) * 2, positionBuffer );
+	if( err != CL_SUCCESS ){
+		throw std::runtime_error( "could not enqueue read" );
+	}
+	queue.finish();
+
+	for(int i=0;i<PARTICLE_COUNT;i++)
+	{
+		max_density = max(max_density,(float)positionBuffer[i+PARTICLE_COUNT]);
+		//min_density = min(min_density,(float)positionBuffer[i+PARTICLE_COUNT]);
+	}
+
+	return (max_density-rho0) / rho0;
+
+}
+
 void step(int nIter)
 {
 	LARGE_INTEGER frequency;				// ticks per second
     LARGE_INTEGER t0, t1, t2;				// ticks
     double elapsedTime;
 	int err;
+	float rho_err;
 
     QueryPerformanceFrequency(&frequency);	// get ticks per second
     QueryPerformanceCounter(&t1);			// start timer
@@ -1019,7 +1035,10 @@ void step(int nIter)
 
 	_runIndexx( queue ); queue.finish();				 QueryPerformanceCounter(&t2); printf("_runIndexx: \t\t%9.3f ms\n",					(t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart); t1 = t2;
 
-	_runIndexPostPass( queue ); queue.finish();			 QueryPerformanceCounter(&t2); printf("_runIndexPostPass: \t%9.3f ms\n",			(t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart); t1 = t2;
+
+
+	// this is completely new _runIndexPostPass, very fast, which replaced the previous one (slow, non-optimal)
+	_runIndexPostPass( ); /*queue.finish();*/			 QueryPerformanceCounter(&t2); printf("_runIndexPostPass: \t%9.3f ms\n",			(t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart); t1 = t2;
 
 	_runFindNeighbors( queue ); queue.finish();			 QueryPerformanceCounter(&t2); printf("_runFindNeighbors: \t%9.3f ms\n",			(t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart); t1 = t2;
 
@@ -1041,29 +1060,43 @@ void step(int nIter)
 		// viscosity force needs density to be calculated preliminarily:
 
 		_run_pcisph_computeDensity( queue ); queue.finish(); /*writeLog_neighbor_count();*/  //writeLog_density();
+		//printf("_run_pcisph_computeDensity\n");
 		 
 		// compute forces F_viscous,gravity,external; initialize p(t)=0.0 and Fp(t)=0.0:
 		_run_pcisph_computeForcesAndInitPressure( queue ); queue.finish();// writeLog_accelerations();
+		//printf("_run_pcisph_computeForcesAndInitPressure\n");
 		 
 		// this is the main prediction-correction loop which works until rho_err_*_(t+1) > d_rho (~1%)
 		int iter = 0;
-		int maxIterations = 3;//3;
+		int maxIterations = 5;//3;
 		do
 		{
 			_run_pcisph_predictPositions(queue); queue.finish();	//writeLog_positions_pred();
-			_run_pcisph_predictDensity(queue); queue.finish();	//	writeLog_density_pred();
+			//printf("_run_pcisph_predictPositions\n");
+			_run_pcisph_predictDensity(queue); queue.finish();		//writeLog_density_pred(iter);
+			//printf("_run_pcisph_predictDensity\n");
 			_run_pcisph_correctPressure(queue); queue.finish();		//writeLog_pressure();
+			//printf("_run_pcisph_correctPressure\n");
 			_run_pcisph_computePressureForceAcceleration( queue ); queue.finish(); //writeLog_accelerations_p();
+			//printf("_run_pcisph_computePressureForceAcceleration\n");
 
 			iter++;
+			/*
+			rho_err=getDensityError(iter);
+			printf("iter: %d \t\t\trho_err: %f\n",iter,rho_err);
+			/**/
+			/*if(iter>5)
+			{
+				iter = iter;
+			}*/
 		}
-		while(iter<maxIterations);
+		while( (iter<maxIterations) /* && (rho_err >= 0.02f)*/); //(until error becomes less than 2%)
 
 		// for all particles: compute new velocity v(t+1)
 		// for all particles: compute new position x(t+1)
 		_run_pcisph_integrate( queue ); queue.finish();	//writeLog_positions();
 
-		QueryPerformanceCounter(&t2); printf("_runPCISPH: \t\t%9.3f ms\n",	(t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart); t1 = t2;
+		QueryPerformanceCounter(&t2); printf("_runPCISPH: \t\t%9.3f ms\t%d iteration(s)\n",	(t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart, iter); t1 = t2;
 	}
 
 	
@@ -1073,12 +1106,14 @@ void step(int nIter)
 	// END OF PCISPH
 
 
+	//printf("_[0]\n");
 	//printf("enter <queue.enqueueReadBuffer>, line 700 at main.cpp\n");
 	err = queue.enqueueReadBuffer( position, CL_TRUE, 0, PARTICLE_COUNT * sizeof( float ) * 4, positionBuffer );
 	if( err != CL_SUCCESS ){
 		throw std::runtime_error( "could not enqueue position read" );
 	}
 	queue.finish();
+	//printf("_[1]\n");
 
 	QueryPerformanceCounter(&t2);// stop timer
 	elapsedTime = (t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart;  t1 = t2;
@@ -1090,6 +1125,7 @@ void step(int nIter)
 		throw std::runtime_error( "could not enqueue neighborMap read" );
 	}
 	queue.finish();
+	//printf("_[2]\n");
 
 	QueryPerformanceCounter(&t2);// stop timer
 	elapsedTime = (t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart;  t1 = t2;
@@ -1100,6 +1136,7 @@ void step(int nIter)
 		throw std::runtime_error( "could not enqueue particleIndexBuffer read" );
 	}
 	queue.finish();
+	//printf("_[3]\n");
 
 	QueryPerformanceCounter(&t2);// stop timer
 	elapsedTime = (t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart;  t1 = t2;
@@ -1109,7 +1146,7 @@ void step(int nIter)
 	elapsedTime = (t2.QuadPart - t0.QuadPart) * 1000.0 / frequency.QuadPart;  
 	printf("------------------------------------\n");
 	printf("_Total_step_time:\t%9.3f ms\n",elapsedTime);
-	printf("====================================\n");
+	printf("------------------------------------\n");
 }
 
 
@@ -1216,9 +1253,9 @@ void initializeOpenCL(
 	program = cl::Program( context, source );   
 //#ifdef NDEBUG
 	//E:\Distrib\_OpenWorm related soft\Smoothed-Particle-Hydrodynamics
-/*work*/  //	err = program.build( devices, "-g -s \"E:\\Distrib\\_OpenWorm related soft\\Smoothed-Particle-Hydrodynamics\\sphFluidDemo.cl\"" );
+/*work*/  	//err = program.build( devices, "-g -s \"E:\\Distrib\\_OpenWorm related soft\\Smoothed-Particle-Hydrodynamics\\sphFluidDemo.cl\"" );
 /*homeS*/ // err = program.build( devices,"-g -s \"C:\\Users\\Sergey\\Desktop\\SphFluid_CLGL_myNeighborhoodSearch_12may2012\\sphFluidDemo.cl\"" );
-/*homeA*/ //   err = program.build( devices, "-g -s \"D:\\_OpenWorm\\SphFluid_CLGL_original_32nearest_PCI\\sphFluidDemo.cl\"" );
+/*homeA*/   // err = program.build( devices, "-g -s \"D:\\_OpenWorm\\SphFluid_CLGL_original_32nearest_PCI\\sphFluidDemo.cl\"" );
 	//D:\_OpenWorm\SphFluid_CLGL_original_32nearest_PCI
 /*#else*/
 	//err = program.build( devices, "-g" );
@@ -1241,8 +1278,6 @@ int sph_fluid_main_start ( /*int argc, char **argv*/ )
 	positionBuffer = new float[ 8 * PARTICLE_COUNT ];
 	velocityBuffer = new float[ 4 * PARTICLE_COUNT ];
 
-
-
 	neighborMapBuffer = new float[( NK * sizeof( float ) * 2 )];
 	particleIndexBuffer = new unsigned int[PARTICLE_COUNT * 2];
 
@@ -1262,6 +1297,10 @@ int sph_fluid_main_start ( /*int argc, char **argv*/ )
 		gridCellsY = (int)( ( YMAX - YMIN ) / h ) + 1;
 		gridCellsZ = (int)( ( ZMAX - ZMIN ) / h ) + 1;
 		gridCellCount = gridCellsX * gridCellsY * gridCellsZ;
+
+		//28aug_Palyanov_start_block
+		gridNextNonEmptyCellBuffer = new unsigned int[gridCellCount+1];
+		//28aug_Palyanov_end_block
 
 		acceleration = cl::Buffer( context, CL_MEM_READ_WRITE, ( PARTICLE_COUNT * sizeof( float ) * 4 * 2 ), NULL, &err );
 		if( err != CL_SUCCESS ){
@@ -1336,10 +1375,6 @@ int sph_fluid_main_start ( /*int argc, char **argv*/ )
 		hashParticles = cl::Kernel( program, "hashParticles", &err );
 		if( err != CL_SUCCESS ){
 			throw std::runtime_error( "kernel hashParticles creation failed" );
-		}
-		indexPostPass = cl::Kernel( program, "indexPostPass", &err );
-		if( err != CL_SUCCESS ){
-			throw std::runtime_error( "kernel indexPostPass creation failed" );
 		}
 		indexx = cl::Kernel( program, "indexx", &err );
 		if( err != CL_SUCCESS ){
@@ -1423,7 +1458,7 @@ int sph_fluid_main_start ( /*int argc, char **argv*/ )
 		
 		float x,y,z;
 
-		float coeff = 1.9f;//2.5//1.7
+		float coeff = 2.11f;/*1.61*/;//2.11f;//2.5//1.7
 		//float cGrad = 1.0;
 
 		x = 0*XMAX/4+h/(2*coeff);
@@ -1509,4 +1544,5 @@ void sph_fluid_main_stop ()
 	delete [] velocityBuffer;
 	delete [] neighborMapBuffer;
 	delete [] particleIndexBuffer;
+	delete [] gridNextNonEmptyCellBuffer;
 }

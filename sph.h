@@ -1,7 +1,7 @@
 #ifndef __SPH__
 #define __SPH__
 
-#define PARTICLE_COUNT ( 1024*16/*16*/ )
+#define PARTICLE_COUNT ( 1024*32/*16*/ )
 #define NEIGHBOR_COUNT 32
 
 #define PCISPH 1 // change to 0 for ordinary SPH
@@ -12,11 +12,17 @@
 #endif
 
 #define XMIN 0
-#define XMAX 150//50//100
+#define XMAX 100//50//100
 #define YMIN 0
-#define YMAX 150//40//80
+#define YMAX 80//40//80
 #define ZMIN 0
-#define ZMAX 20//30
+#define ZMAX 60//30
+
+//================================== for internal use ============
+
+#define NO_PARTICLE_ID -1
+#define NO_CELL_ID -1
+#define NO_DISTANCE -1.0f
 
 
 #endif

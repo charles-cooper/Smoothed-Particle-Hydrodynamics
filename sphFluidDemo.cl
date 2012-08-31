@@ -9,10 +9,6 @@
 //#define PARTICLE_COUNT ( 32 * 1024 )//( 32 * 1024 )
 //#define NEIGHBOR_COUNT 32
 
-#define NO_PARTICLE_ID -1
-#define NO_CELL_ID -1
-#define NO_DISTANCE -1.0f
-
 #define POSITION_CELL_ID( i ) i.w
 
 #define PI_CELL_ID( name ) name.x
@@ -706,34 +702,6 @@ __kernel void hashParticles(
 }
 
 
-
-
-
-
-
-__kernel void indexPostPass(
-							__global uint * gridCellIndex,
-							int gridCellCount,
-							__global uint * gridCellIndexFixedUp
-							)
-{
-	
-	int id = get_global_id( 0 );
-	if( id <= gridCellCount ){
-		int idx = id;
-		int cellId = NO_CELL_ID;
-		bool loop;
-		do{
-			cellId = gridCellIndex[ idx++ ];
-			//loop = cellId == NO_CELL_ID && idx <= gridCellCount;
-			loop = (cellId == NO_CELL_ID) && (idx <= gridCellCount);
-		}while( loop );
-		gridCellIndexFixedUp[ id ] = cellId;
-	}
-}
-
-
-
 __kernel void indexx(
 					 __global uint2 * particleIndex,
 					 int gridCellCount,
@@ -1094,7 +1062,7 @@ __kernel void pcisph_computeForcesAndInitPressure(
 								  __global float4 * sortedVelocity,
 								  __global float4 * acceleration,
 								  __global uint * particleIndexBack,
-								  float gradWspikyCoefficient,
+								  float Wpoly6Coefficient,
 								  float del2WviscosityCoefficient,
 								  float h,
 								  float mass,
@@ -1110,6 +1078,7 @@ __kernel void pcisph_computeForcesAndInitPressure(
 
 	int idx = id * NEIGHBOR_COUNT;
 	float hScaled = h * simulationScale;
+	float hScaled2 = hScaled*hScaled;//29aug_A.Palyanov
 
 	float4 acceleration_i;// = (float4)( 0.0f, 0.0f, 0.0f, 0.0f );
 	float2 nm;
@@ -1119,6 +1088,11 @@ __kernel void pcisph_computeForcesAndInitPressure(
 	float4 sum = (float4)( 0.0f, 0.0f, 0.0f, 0.0f );
 	float4 vi,vj;
 	float rho_i,rho_j;
+	float4 accel_surfTensForce = (float4)( 0.0f, 0.0f, 0.0f, 0.0f );
+	//float4 normalVector = (float4)( 0.0f, 0.0f, 0.0f, 0.0f );
+	//float  nV_length;
+	//int neighbor_cnt = 0;
+
 
 	do{
 		if( (jd = NEIGHBOR_MAP_ID(neighborMap[ idx + nc])) != NO_PARTICLE_ID )
@@ -1127,17 +1101,41 @@ __kernel void pcisph_computeForcesAndInitPressure(
 
 			if(r_ij<hScaled)
 			{
+				//neighbor_cnt++;
 				rho_i = rho[id];
 				rho_j = rho[jd];
 				vi = sortedVelocity[id];
 				vj = sortedVelocity[jd];
 				sum += (sortedVelocity[jd]-sortedVelocity[id])*(hScaled-r_ij)/rho[jd];
+				//29aug_A.Palyanov_start_block
+				// M.Beckner & M.Teschner / Weakly compressible SPH for free surface flows. 2007.
+				//normalVector += sortedPosition[id]-sortedPosition[jd];
+				//	-0.3f * (sortedPosition[id]-sortedPosition[jd])*simulationScale * pow(hScaled2/2/*-r_ij*r_ij*/,3);
+				//29aug_A.Palyanov_end_block
+				accel_surfTensForce += -0.00234*Wpoly6Coefficient*pow(hScaled2/2/*-r_ij*r_ij*/,3)*(sortedPosition[id]-sortedPosition[jd])*simulationScale;
 			}
 		}
 		
 	}while(  ++nc < NEIGHBOR_COUNT );
 
-	float viscosity = 0.3f;//0.1f
+	accel_surfTensForce.w = 0.f;
+
+	/*
+	if(neighbor_cnt)
+	{
+		normalVector[3] = 0;
+		normalVector /= (float)neighbor_cnt;
+		nV_length = SQRT( normalVector[0]*normalVector[0]+
+						  normalVector[1]*normalVector[1]+
+						  normalVector[2]*normalVector[2]);
+
+		if(nV_length>h/10.f)
+		{
+			accel_surfTensForce = -(normalVector/nV_length)*25;
+		}
+	}*/
+
+	float viscosity = 0.7;//0.5f;//0.1f
 
 	sum *= mass*viscosity*del2WviscosityCoefficient/rho[id];
 
@@ -1145,12 +1143,14 @@ __kernel void pcisph_computeForcesAndInitPressure(
 	acceleration_i = sum;
 	//acceleration_i = (float4)( 0.0f, 0.0f, 0.0f, 0.0f );//sum;
 	
-
 	//acceleration_i += calcBoundaryForceAcceleration(sortedPosition[id],sortedVelocity[id],xmin,xmax,ymin,ymax,zmin,zmax,h,simulationScale);
 	
 	acceleration_i += (float4)( gravity_x, gravity_y, gravity_z, 0.0f );
 
+	acceleration_i +=  accel_surfTensForce; //29aug_A.Palyanov
+
 	acceleration[ id ] = acceleration_i; 
+
 	// 1st half of 'acceleration' array is used to store acceleration corresponding to gravity, visc. force etc.
 	acceleration[ PARTICLE_COUNT+id ] = (float4)(0.0f, 0.0f, 0.0f, 0.0f );
 	// 2nd half of 'acceleration' array is used to store pressure force
@@ -1195,8 +1195,8 @@ __kernel void pcisph_predictPositions(
 	float4 newPosition_ = position_ + posTimeStep * newVelocity_; //newPosition_.w = 0.f;
 
 
-	handleBoundaryConditions( position_, &newVelocity_, posTimeStep, &newPosition_,
-		xmin, xmax, ymin, ymax, zmin, zmax, damping );
+	//handleBoundaryConditions( position_, &newVelocity_, posTimeStep, &newPosition_,
+	//	xmin, xmax, ymin, ymax, zmin, zmax, damping );
 
 	//sortedVelocity[id] = newVelocity_;// sorted position, as well as velocity, 
 	sortedPosition[PARTICLE_COUNT+id] = newPosition_;// in current version sortedPosition array has double size, 
@@ -1352,9 +1352,9 @@ __kernel void pcisph_computePressureForceAcceleration(
 
 			if(r_ij<hScaled)
 			{
-				//value = -(hScaled-r_ij)*(hScaled-r_ij)*0.5f*(pressure[id]+pressure[jd])/rho[PARTICLE_COUNT+jd];
-				value = -(hScaled-r_ij)*(hScaled-r_ij)*( pressure[id]/(rho[PARTICLE_COUNT+id]*rho[PARTICLE_COUNT+id])
-														+pressure[jd]/(rho[PARTICLE_COUNT+id]*rho[PARTICLE_COUNT+id]) );
+				value = -(hScaled-r_ij)*(hScaled-r_ij)*0.5f*(pressure[id]+pressure[jd])/rho[PARTICLE_COUNT+jd];
+				/*2*///value = -(hScaled-r_ij)*(hScaled-r_ij)*( pressure[id]/(rho[PARTICLE_COUNT+id]*rho[PARTICLE_COUNT+id])
+				/*2*///										+pressure[jd]/(rho[PARTICLE_COUNT+id]*rho[PARTICLE_COUNT+id]) );
 				vr_ij = (sortedPosition[id]-sortedPosition[jd])*simulationScale; vr_ij.w = 0;
 				result += value*vr_ij/r_ij;
 				//result = result;
@@ -1372,8 +1372,8 @@ __kernel void pcisph_computePressureForceAcceleration(
 
 	}while( ++nc < NEIGHBOR_COUNT );
 
-	//result *= mass*gradWspikyCoefficient/rho[PARTICLE_COUNT+id];
-	result *= mass*gradWspikyCoefficient;
+	/*1*/result *= mass*gradWspikyCoefficient/rho[PARTICLE_COUNT+id];
+	/*2*///result *= mass*gradWspikyCoefficient;
 	//
 	//result = -2.f*mass*pressure[id]*sum_gradW/(rho0*rho0);
 	//result.w = 0.0f;
@@ -1404,9 +1404,8 @@ __kernel void pcisph_integrate(
 						__global float * rho
 						)
 {
-	int id = get_global_id( 0 );
-	id = particleIndexBack[id];
-
+	int id = get_global_id( 0 ); if(id>=PARTICLE_COUNT) return;
+	id = particleIndexBack[id]; if(id>=PARTICLE_COUNT) return;
 	int id_source_particle = PI_SERIAL_ID( particleIndex[id] );
 
 	float4 acceleration_ = acceleration[ id ] + acceleration[ PARTICLE_COUNT+id ]; acceleration_.w = 0.f;
@@ -1418,7 +1417,14 @@ __kernel void pcisph_integrate(
 	//float speedLimit = 100.f;
 
 	// Semi-implicit Euler integration 
+	//float nV_length;
+	//float vel_limit = 100.f;
 	float4 newVelocity_ = velocity_ + timeStep * acceleration_; //newVelocity_.w = 0.f;
+	//newVelocity_[3] = 0;
+	//nV_length = SQRT(DOT(newVelocity_,newVelocity_));
+	//if(nV_length>vel_limit)
+	//	newVelocity_ = newVelocity_*vel_limit/nV_length;
+
 	float posTimeStep = timeStep * simulationScaleInv;			
 	float4 newPosition_ = position_ + posTimeStep * newVelocity_; //newPosition_.w = 0.f;
 
@@ -1437,7 +1443,14 @@ __kernel void pcisph_integrate(
 
 	newPosition_.w = rho[id];
 
-	velocity[ id_source_particle ] = newVelocity_;//(velocity_+newVelocity_)*0.5f;
+	if(newPosition_.x<xmin) newPosition_.x = xmin;//A.Palyanov 30.08.2012
+	if(newPosition_.y<ymin) newPosition_.y = ymin;//A.Palyanov 30.08.2012
+	if(newPosition_.z<zmin) newPosition_.z = zmin;//A.Palyanov 30.08.2012
+	if(newPosition_.x>xmax-0.000001f) newPosition_.x = xmax-0.000001f;//A.Palyanov 30.08.2012
+	if(newPosition_.y>ymax-0.000001f) newPosition_.y = ymax-0.000001f;//A.Palyanov 30.08.2012
+	if(newPosition_.z>zmax-0.000001f) newPosition_.z = zmax-0.000001f;//A.Palyanov 30.08.2012
+	// better replace 0.0000001 with smoothingRadius*0.001 or smth like this to keep this
+
+	velocity[ id_source_particle ] = (velocity_+newVelocity_)*0.5f;//newVelocity_;
 	position[ id_source_particle ] = newPosition_;
 }
-
