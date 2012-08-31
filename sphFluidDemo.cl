@@ -202,6 +202,7 @@ __kernel void computeAcceleration(
 
 	int j = 0;
 	bool loop;
+
 	do{
 		nm = neighborMap[ idk + j ];
 		int neighborParticleId = NEIGHBOR_MAP_ID( nm );
@@ -1061,9 +1062,11 @@ __kernel void calculateElasticForces(__global float8 * position,
 									 float gradShapedCoeefficient,
 									 float h,
 									 float simulationScale,
-									 float poison_ratio,
+									 float poisson_ratio,
 									 float young_module,
-									 __global float2 * neighborMap)
+									 __global float2 * neighborMap,
+									 __global float4 * acceleration,
+									 float mass)
 {
 	int id = get_global_id(0);
 	int particleId = id + LIQUID_PARTICLE_COUNT;
@@ -1126,11 +1129,17 @@ __kernel void calculateElasticForces(__global float8 * position,
 	w.z = gradDisplacement3.z;
 	w.w = 0;
 	calcStressJacobianMult(&u,&v,&w,poisson_ratio,young_module,&row1,&row2,&row3);
-	
-	force.x = -2 * volume[particleId] * ( row1.x * d_ij.x + row1.y * d_ij.y + row1.z * d_ij.z );
-	force.y = -2 * volume[particleId] * ( row2.x * d_ij.x + row2.y * d_ij.y + row2.z * d_ij.z );
-	force.z = -2 * volume[particleId] * ( row3.x * d_ij.x + row3.y * d_ij.y + row3.z * d_ij.z );
-	force.w = 0;
+	while(j < NEIGHBOR_COUNT && NEIGHBOR_MAP_ID(neighborMap[NEIGHBOR_COUNT * particleId + j]) != -1){
+		neighborId = NEIGHBOR_MAP_ID(neighborMap[NEIGHBOR_COUNT * particleId + j]);
+		if(neighborId >= LIQUID_PARTICLE_COUNT){
+			d_ij = volume[neighborId - LIQUID_PARTICLE_COUNT];
+			force.x += -2 * volume[particleId] * ( row1.x * d_ij.x + row1.y * d_ij.y + row1.z * d_ij.z );
+			force.y += -2 * volume[particleId] * ( row2.x * d_ij.x + row2.y * d_ij.y + row2.z * d_ij.z );
+			force.z += -2 * volume[particleId] * ( row3.x * d_ij.x + row3.y * d_ij.y + row3.z * d_ij.z );
+			force.w = 0;
+		}
+	}
+	acceleration[particleId] = force / mass;
 	//return result;
 }
 
@@ -1153,7 +1162,8 @@ __kernel void integrate(
 						__global float8 * position,
 						__global float4 * velocity,
 						__global uint * elasticParticleCurrentIndex,
-						__global float4 * displacement
+						__global float4 * displacement,
+						__global float4 * previousAcceleration
 						)
 {
 	int id = get_global_id( 0 );
@@ -1188,14 +1198,20 @@ __kernel void integrate(
 	}
 	else{//If elastic matter
 		//ElasticForceContribution
-		float4 newVelocity_ = velocity_ + timeStep * acceleration_;
+		//Leapfrog integration http://en.wikipedia.org/wiki/Leapfrog_integration
+		float4 prevAcceleration_ = previousAcceleration[realId];
+		
+		/*float4 newVelocity_ = velocity_ + timeStep * (acceleration_ + prevAcceleration_)/2;
 		float posTimeStep = timeStep * simulationScaleInv; 
-		float4 newPosition_ = position_ + posTimeStep * newVelocity_;
-
+		float4 newPosition_ = position_ + posTimeStep * posTimeStep * prevAcceleration_ / 2;
 		handleBoundaryConditions( position_, &newVelocity_, posTimeStep, &newPosition_,
 			xmin, xmax, ymin, ymax, zmin, zmax, damping );
-		float4 displacement = newPosition_ - position[realId].lo;
-		
+		velocity[ id ] = newVelocity_;
+		position[ id ].x = newPosition_.x;
+		position[ id ].y = newPosition_.y;
+		position[ id ].z = newPosition_.z;
+		previousAcceleration[realId] = acceleration_;
+		/**/
 	}
 }
 

@@ -110,6 +110,8 @@ cl::Buffer sortedPosition;
 cl::Buffer sortedVelocity;
 cl::Buffer velocity;
 
+
+cl::Buffer previousAcceleration;
 // Kernels
 cl::Kernel clearBuffers;
 cl::Kernel computeAcceleration;
@@ -287,7 +289,7 @@ _runComputeAcceleration( cl::CommandQueue queue ){
 	computeAcceleration.setArg( 12, simulationScale );
 	computeAcceleration.setArg( 13, acceleration );
 	queue.enqueueNDRangeKernel(
-		computeAcceleration, cl::NullRange, cl::NDRange( (int) ( PARTICLE_COUNT ) ),
+		computeAcceleration, cl::NullRange, cl::NDRange( (int) ( LIQUID_PARTICLE_COUNT ) ),
 #if defined( __APPLE__ )
 		cl::NullRange, NULL, NULL );
 #else
@@ -342,7 +344,7 @@ _runComputeDensityPressure( cl::CommandQueue queue ){
 	computeDensityPressure.setArg( 8, rho );
 	computeDensityPressure.setArg( 9, rhoInv );
 	queue.enqueueNDRangeKernel(
-		computeDensityPressure, cl::NullRange, cl::NDRange( (int) ( PARTICLE_COUNT ) ),
+		computeDensityPressure, cl::NullRange, cl::NDRange( (int) ( LIQUID_PARTICLE_COUNT ) ),
 #if defined( __APPLE__ )
 		cl::NullRange, NULL, NULL );
 #else
@@ -476,6 +478,7 @@ unsigned int _runCalculateElasticForces( cl::CommandQueue queue ){
 	calculateElasticForces.setArg(7,poisson_ratio);
 	calculateElasticForces.setArg(8,young_module);
 	calculateElasticForces.setArg(9,neighborMap);
+	calculateElasticForces.setArg(10,mass);
 	queue.enqueueNDRangeKernel(calculateElasticForces,cl::NullRange,cl::NDRange( (int) ( ELASTIC_PARTICLE_COUNT ) ),
 #if defined( __APPLE__ )
 		cl::NullRange, NULL, NULL );
@@ -665,6 +668,8 @@ _runIntegrate( cl::CommandQueue queue ){
 	integrate.setArg( 16, velocity );
 	integrate.setArg( 17, elasticParticleCurrentIndex );
 	integrate.setArg( 18, displacement );
+	integrate.setArg( 19, previousAcceleration );
+
 	queue.enqueueNDRangeKernel(
 		integrate, cl::NullRange, cl::NDRange( (int) ( PARTICLE_COUNT ) ),
 #if defined( __APPLE__ )
@@ -837,7 +842,7 @@ void step()
 
 //#ifdef NDEBUG
 	printf("\n");
-	if(nIter == 0){
+	/**/if(nIter == 0){
 		_runFindNeighborFotElasticParticle( queue ); queue.finish();
 		QueryPerformanceCounter(&t2);
 		printf("_runFindNeighborFotElasticParticle: \t%9.3f ms\n",	(t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart); t1 = t2;
@@ -846,15 +851,15 @@ void step()
 			throw std::runtime_error( "could not enqueue neighborMap read" );
 		}
 		queue.finish();
-		/**/FILE *f2 = fopen("particleIndex.txt","wt");
+	/*	FILE *f2 = fopen("particleIndex.txt","wt");
 		for(int id=0;id<( NEIGHBOR_COUNT * 2 );id+=2) 
 		{
 			int pId = (int)neighborMapBuffer[(LIQUID_PARTICLE_COUNT)*NEIGHBOR_COUNT*2+id];
 			fprintf(f2,"%d\n",pId);
 			//fprintf(f2,"%d\n",particleIndexBuffer[id+1]);
 		}
-		fclose(f2);/**/
-	}
+		fclose(f2);*/
+	}/**/
 	_runClearBuffers( queue ); queue.finish();
 	QueryPerformanceCounter(&t2);
 	printf("_runClearBuffers: \t%9.3f ms\n",	(t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart); t1 = t2;
@@ -895,7 +900,7 @@ void step()
 
 	_runCalculateElasticForces( queue ); queue.finish();
 	QueryPerformanceCounter(&t2);
-	printf("_runComputeAcceleration: \t%9.3f ms\n",	(t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart); t1 = t2;
+	printf("_runCalculateElasticForces: \t%9.3f ms\n",	(t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart); t1 = t2;
 
 	_runIntegrate( queue ); queue.finish();
 	QueryPerformanceCounter(&t2);
@@ -1018,7 +1023,7 @@ void initializeOpenCL(
 */
 
 	//0-CPU, 1-GPU// depends on order appropriet drivers was instaled
-	int plList=0;//selected platform index in platformList array
+	int plList=1;//selected platform index in platformList array
 
 	cl_context_properties cprops[3] = { CL_CONTEXT_PLATFORM, (cl_context_properties) (platformList[plList])(), 0 };
 
@@ -1061,11 +1066,11 @@ void initializeOpenCL(
 	program = cl::Program( context, source );   
 //#ifdef NDEBUG
 /*work*///	err = program.build( devices, "-g -s \"E:\\Distrib\\_OpenWorm related soft\\SPH\\SphFluid_CLGL_original_highlight_neiborhood\\sphFluidDemo.cl\"" );
-/*home*/// err = program.build( devices,"-g -s \"C:\\Users\\Sergey\\Desktop\\SphFluid_CLGL_myNeighborhoodSearch_12may2012\\sphFluidDemo.cl\"" );
+/*home SERGEY WORK*/ err = program.build( devices,"-g -s \"C:\\Users\\Serg\\Documents\\GitHub\\Smoothed-Particle-Hydrodynamics\\sphFluidDemo.cl\"" );
 /*SERGEY LAPTOP*/// err = program.build(devices, "-g -s \"C:\\User\\Seka\\Work\\Smoothed-Particle-Hydrodynamics\\sphFluidDemo.cl\"");
 /*#else*/
 	//err = program.build( devices, "-g" );
-	err = program.build( devices, "" );
+	//err = program.build( devices, "" );
 /*#endif*/
 	if( err != CL_SUCCESS ){
 		std::string compilationErrors;
@@ -1083,6 +1088,7 @@ int sph_fluid_main_start ( /*int argc, char **argv*/ )
 	int err;
 	positionBuffer = new float[ 8 * PARTICLE_COUNT ];
 	velocityBuffer = new float[ 4 * PARTICLE_COUNT ];
+	float * prevAccelerationBuffer = new float[ 4 * ELASTIC_PARTICLE_COUNT ];
 	float * displacementBuffer = new float[ 4 * ELASTIC_PARTICLE_COUNT ];
 
 
@@ -1111,6 +1117,12 @@ int sph_fluid_main_start ( /*int argc, char **argv*/ )
 		if( err != CL_SUCCESS ){
 			throw std::runtime_error( "buffer acceleration creation failed" );
 		}
+
+		previousAcceleration = cl::Buffer( context, CL_MEM_READ_WRITE, ( ELASTIC_PARTICLE_COUNT * sizeof( float ) * 4 ), NULL, &err );
+		if( err != CL_SUCCESS ){
+			throw std::runtime_error( "buffer acceleration creation failed" );
+		}
+
 		gridCellIndex = cl::Buffer( context, CL_MEM_READ_WRITE, ( ( gridCellCount + 1 ) * sizeof( unsigned int ) * 1 ), NULL, &err );
 		if( err != CL_SUCCESS ){
 			throw std::runtime_error( "buffer gridCellIndex creation failed" );
@@ -1275,13 +1287,18 @@ int sph_fluid_main_start ( /*int argc, char **argv*/ )
 					velocityVector[ 1 ] = 0;
 					velocityVector[ 2 ] = 0;
 					velocityVector[ 3 ] = 0;
-					p++;
-					i++;
-					float * displacementVector = displacementBuffer + 4 * i;
+					float * displacementVector = displacementBuffer + 4 * p;
 					displacementVector[ 0 ] = 0.f;
 					displacementVector[ 1 ] = 0.f;
 					displacementVector[ 2 ] = 0.f;
 					displacementVector[ 3 ] = 0.f;
+					float * prevAccelVector = prevAccelerationBuffer + 4 * p;
+					prevAccelVector[ 0 ] = gravity_x;
+					prevAccelVector[ 1 ] = gravity_y;
+					prevAccelVector[ 2 ] = gravity_z;
+					prevAccelVector[ 3 ] = 0.f;
+					p++;
+					i++;
 				}
 		
 		err = queue.enqueueWriteBuffer( position, CL_TRUE, 0, PARTICLE_COUNT * sizeof( float ) * 8, positionBuffer );
@@ -1295,6 +1312,10 @@ int sph_fluid_main_start ( /*int argc, char **argv*/ )
 		err = queue.enqueueWriteBuffer( displacement, CL_TRUE, 0, ELASTIC_PARTICLE_COUNT * sizeof( float ) * 4, displacementBuffer);
 		if( err != CL_SUCCESS ){
 			throw std::runtime_error( "could not enqueue displacement write" );
+		}
+		err = queue.enqueueWriteBuffer( previousAcceleration, CL_TRUE, 0, ELASTIC_PARTICLE_COUNT * sizeof( float ) * 4, prevAccelerationBuffer);
+		if( err != CL_SUCCESS ){
+			throw std::runtime_error( "could not enqueue prevAccelerationBuffer write" );
 		}
 		err = queue.finish();
 		if( err != CL_SUCCESS ){
