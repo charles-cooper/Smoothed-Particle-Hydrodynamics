@@ -54,7 +54,7 @@ const float mass = 0.001f;
 const float simulationScale = 0.004f;
 const float simulationScaleInv = 1.0f / simulationScale;
 const float mu = 10.0f;
-const float timeStep = 0.0042f;
+const float timeStep = 0.0005f;//0.0042f;
 const float CFLLimit = 100.0f;
 const int NK = NEIGHBOR_COUNT * PARTICLE_COUNT;
 const float damping = 0.75f;
@@ -68,8 +68,8 @@ const float gravity_x = 0.0f;
 const float gravity_y = -9.8f;
 const float gravity_z = 0.0f;
 
-const float young_module = 0.05;//http://en.wikipedia.org/wiki/Young_modulus for rubber
-const float poisson_ratio = 0.50;//http://en.wikipedia.org/wiki/Poisson%27s_ratio for rubber
+const float young_module = 0.5f;//http://en.wikipedia.org/wiki/Young_modulus for rubber
+const float poisson_ratio = 0.7;//http://en.wikipedia.org/wiki/Poisson%27s_ratio for rubber
 
 const float shapedCoeefficient = M_PI/(8*h*h*h*h*(M_PI/3 - 8/M_PI + 16/(M_PI*M_PI))) * (2*h)/M_PI;// p. 66 [Sol]
 const float gradShapedCoeefficient = M_PI/(8*h*h*h*h*(M_PI/3 - 8/M_PI + 16/(M_PI*M_PI)));
@@ -126,6 +126,7 @@ cl::Kernel sortPostPass;
 
 cl::Kernel findNeighborFotElasticParticle;
 cl::Kernel calculateElasticForces;
+cl::Kernel calculateVolume;
 
 cl::Buffer elasticParticleCurrentIndex;
 cl::Buffer elasticNeighbourCount;
@@ -289,7 +290,7 @@ _runComputeAcceleration( cl::CommandQueue queue ){
 	computeAcceleration.setArg( 12, simulationScale );
 	computeAcceleration.setArg( 13, acceleration );
 	queue.enqueueNDRangeKernel(
-		computeAcceleration, cl::NullRange, cl::NDRange( (int) ( LIQUID_PARTICLE_COUNT ) ),
+		computeAcceleration, cl::NullRange, cl::NDRange( (int) ( PARTICLE_COUNT ) ),
 #if defined( __APPLE__ )
 		cl::NullRange, NULL, NULL );
 #else
@@ -344,7 +345,7 @@ _runComputeDensityPressure( cl::CommandQueue queue ){
 	computeDensityPressure.setArg( 8, rho );
 	computeDensityPressure.setArg( 9, rhoInv );
 	queue.enqueueNDRangeKernel(
-		computeDensityPressure, cl::NullRange, cl::NDRange( (int) ( LIQUID_PARTICLE_COUNT ) ),
+		computeDensityPressure, cl::NullRange, cl::NDRange( (int) ( PARTICLE_COUNT ) ),
 #if defined( __APPLE__ )
 		cl::NullRange, NULL, NULL );
 #else
@@ -467,19 +468,45 @@ _runHashParticles( cl::CommandQueue queue ){
 	//queue.finish();
 	return 0;
 }
-unsigned int _runCalculateElasticForces( cl::CommandQueue queue ){
-	calculateElasticForces.setArg(0, position);
-	calculateElasticForces.setArg(1, volume);
-	calculateElasticForces.setArg(2, displacement);
-	calculateElasticForces.setArg(3, shapedCoeefficient);
-	calculateElasticForces.setArg(4, gradShapedCoeefficient);
-	calculateElasticForces.setArg(5,h);
-	calculateElasticForces.setArg(6,simulationScale);
-	calculateElasticForces.setArg(7,poisson_ratio);
-	calculateElasticForces.setArg(8,young_module);
-	calculateElasticForces.setArg(9,neighborMap);
-	calculateElasticForces.setArg(10,mass);
-	queue.enqueueNDRangeKernel(calculateElasticForces,cl::NullRange,cl::NDRange( (int) ( ELASTIC_PARTICLE_COUNT ) ),
+unsigned int 
+_runCalculateVolume( cl::CommandQueue queue ){
+
+	calculateVolume.setArg( 0,  position);
+	calculateVolume.setArg( 1,  volume);
+	calculateVolume.setArg( 2,  neighborMap);
+	calculateVolume.setArg( 3,  mass);
+	calculateVolume.setArg( 4,  shapedCoeefficient);
+	calculateVolume.setArg( 5,  h);
+	queue.enqueueNDRangeKernel(
+		calculateVolume, cl::NullRange, cl::NDRange( (int) ( ELASTIC_PARTICLE_COUNT ) ),
+	#if defined( __APPLE__ )
+			cl::NullRange, NULL, NULL );
+	#else
+			cl::NDRange( (int)( 256 ) ), NULL, NULL );
+	#endif
+	#ifdef QUEUE_EACH_KERNEL
+		queue.finish();
+	#endif
+		//queue.finish();
+	return 0;
+}
+unsigned int 
+_runCalculateElasticForces( cl::CommandQueue queue ){
+	//Calculate Elastic Forces
+	calculateElasticForces.setArg( 0, position);
+	calculateElasticForces.setArg( 1, volume);
+	calculateElasticForces.setArg( 2, displacement);
+	calculateElasticForces.setArg( 3, shapedCoeefficient);
+	calculateElasticForces.setArg( 4, gradShapedCoeefficient);
+	calculateElasticForces.setArg( 5, h);
+	calculateElasticForces.setArg( 6, simulationScale);
+	calculateElasticForces.setArg( 7, poisson_ratio);
+	calculateElasticForces.setArg( 8, young_module);
+	calculateElasticForces.setArg( 9, neighborMap);
+	calculateElasticForces.setArg( 10, acceleration);
+	calculateElasticForces.setArg( 11, mass);
+	queue.enqueueNDRangeKernel(
+		calculateElasticForces, cl::NullRange, cl::NDRange( (int) ( ELASTIC_PARTICLE_COUNT ) ),
 #if defined( __APPLE__ )
 		cl::NullRange, NULL, NULL );
 #else
@@ -669,7 +696,6 @@ _runIntegrate( cl::CommandQueue queue ){
 	integrate.setArg( 17, elasticParticleCurrentIndex );
 	integrate.setArg( 18, displacement );
 	integrate.setArg( 19, previousAcceleration );
-
 	queue.enqueueNDRangeKernel(
 		integrate, cl::NullRange, cl::NDRange( (int) ( PARTICLE_COUNT ) ),
 #if defined( __APPLE__ )
@@ -778,7 +804,18 @@ _runSortPostPass( cl::CommandQueue queue ){
 #endif
 #ifdef QUEUE_EACH_KERNEL
 	queue.finish();
-#endif
+#endif/*
+	queue.finish();
+	unsigned int  * _particleIndex = new unsigned int[ ELASTIC_PARTICLE_COUNT * 1 ];
+	queue.enqueueReadBuffer( elasticParticleCurrentIndex, CL_TRUE, 0, ( ELASTIC_PARTICLE_COUNT * 1 * sizeof( unsigned int ) ), _particleIndex );
+	queue.finish();
+	FILE *f2 = fopen("particleIndex.txt","wt");
+	for(int id=0;id<( ELASTIC_PARTICLE_COUNT * 1 );id++) 
+	{
+		fprintf(f2,"%d\n",_particleIndex[id]);
+		//fprintf(f2,"%d\n",_particleIndex[id+1]);
+	}
+	fclose(f2);*/
 	return 0;
 }
 
@@ -898,6 +935,10 @@ void step()
 	QueryPerformanceCounter(&t2);
 	printf("_runComputeAcceleration: \t%9.3f ms\n",	(t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart); t1 = t2;
 
+	_runCalculateVolume( queue ); queue.finish();
+	QueryPerformanceCounter(&t2);
+	printf("_runCalculateVolume: \t%9.3f ms\n",	(t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart); t1 = t2;
+	
 	_runCalculateElasticForces( queue ); queue.finish();
 	QueryPerformanceCounter(&t2);
 	printf("_runCalculateElasticForces: \t%9.3f ms\n",	(t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart); t1 = t2;
@@ -1066,11 +1107,11 @@ void initializeOpenCL(
 	program = cl::Program( context, source );   
 //#ifdef NDEBUG
 /*work*///	err = program.build( devices, "-g -s \"E:\\Distrib\\_OpenWorm related soft\\SPH\\SphFluid_CLGL_original_highlight_neiborhood\\sphFluidDemo.cl\"" );
-/*home SERGEY WORK*/ err = program.build( devices,"-g -s \"C:\\Users\\Serg\\Documents\\GitHub\\Smoothed-Particle-Hydrodynamics\\sphFluidDemo.cl\"" );
+/*home SERGEY WORK*/// err = program.build( devices,"-g -s \"C:\\Users\\Serg\\Documents\\GitHub\\Smoothed-Particle-Hydrodynamics\\sphFluidDemo.cl\"" );
 /*SERGEY LAPTOP*/// err = program.build(devices, "-g -s \"C:\\User\\Seka\\Work\\Smoothed-Particle-Hydrodynamics\\sphFluidDemo.cl\"");
 /*#else*/
 	//err = program.build( devices, "-g" );
-	//err = program.build( devices, "" );
+	err = program.build( devices, "" );
 /*#endif*/
 	if( err != CL_SUCCESS ){
 		std::string compilationErrors;
@@ -1230,6 +1271,10 @@ int sph_fluid_main_start ( /*int argc, char **argv*/ )
 		if( err != CL_SUCCESS){
 			throw std::runtime_error("Kernel calculateElasticForces creation failed");
 		}
+		calculateVolume = cl::Kernel(program,"calculateVolume",&err);
+		if(err != CL_SUCCESS){
+			throw std::runtime_error("Kernel calculateElasticForces creation failed");
+		}
 		int i = 0;
 		for( i = 0; i < LIQUID_PARTICLE_COUNT; ++i ){
 			float x, y, z;
@@ -1263,9 +1308,9 @@ int sph_fluid_main_start ( /*int argc, char **argv*/ )
 		
 		//Creation of Elastic body
 		int p = 0;
-		for( int t = 0; (t < 16)&&(p<ELASTIC_PARTICLE_COUNT); t++ )
-			for( int j = 0; (j < 16)&&(p<ELASTIC_PARTICLE_COUNT); j++ )
-				for( int k = 0; (k < 64)&&(p<ELASTIC_PARTICLE_COUNT); k++ )
+		for( int t = 32; (t < 48)&&(p<ELASTIC_PARTICLE_COUNT); t++ )
+			for( int j = 0; (j < 64)&&(p<ELASTIC_PARTICLE_COUNT); j++ )
+				for( int k = 32; (k < 48)&&(p<ELASTIC_PARTICLE_COUNT); k++ )
 				{
 					float x, y, z;
 					float bodyIndex = 0;
@@ -1293,9 +1338,9 @@ int sph_fluid_main_start ( /*int argc, char **argv*/ )
 					displacementVector[ 2 ] = 0.f;
 					displacementVector[ 3 ] = 0.f;
 					float * prevAccelVector = prevAccelerationBuffer + 4 * p;
-					prevAccelVector[ 0 ] = gravity_x;
-					prevAccelVector[ 1 ] = gravity_y;
-					prevAccelVector[ 2 ] = gravity_z;
+					prevAccelVector[ 0 ] = 0;//gravity_x;
+					prevAccelVector[ 1 ] = 0;//gravity_y;
+					prevAccelVector[ 2 ] = 0;//gravity_z;
 					prevAccelVector[ 3 ] = 0.f;
 					p++;
 					i++;

@@ -1,10 +1,10 @@
 #ifndef __SPH__
 #define __SPH__
 
-#define PARTICLE_COUNT ( 32 * 1024 )
+#define PARTICLE_COUNT ( 16 * 1024 )
 #define NEIGHBOR_COUNT 32
 
-#define LIQUID_PARTICLE_COUNT ( 16 * 1024 )
+#define LIQUID_PARTICLE_COUNT ( 0 * 1024 )
 #define ELASTIC_PARTICLE_COUNT ( PARTICLE_COUNT - LIQUID_PARTICLE_COUNT )
 
 #ifndef M_PI

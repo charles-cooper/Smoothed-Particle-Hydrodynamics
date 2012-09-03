@@ -6,6 +6,8 @@
 // Eurographics/SIGGRAPH Symposium on Computer Animation (2003).
 
 #include "sph.h"
+
+#pragma OPENCL EXTENSION cl_intel_printf: enable
 //#define PARTICLE_COUNT ( 32 * 1024 )//( 32 * 1024 )
 //#define NEIGHBOR_COUNT 32
 
@@ -202,37 +204,38 @@ __kernel void computeAcceleration(
 
 	int j = 0;
 	bool loop;
+	if(id < LIQUID_PARTICLE_COUNT){
+		do{
+			nm = neighborMap[ idk + j ];
+			int neighborParticleId = NEIGHBOR_MAP_ID( nm );
+			bool isNeighbor = ( neighborParticleId != NO_PARTICLE_ID );
+			if( isNeighbor ){
+				float p_j = pressure[ neighborParticleId ];
+				float rho_j_inv = rhoInv[ neighborParticleId ];
+				float r = NEIGHBOR_MAP_DISTANCE( nm );
+				float4 dgradP = contributeGradP( id, neighborParticleId, p_i, p_j, rho_j_inv,
+					position_i, pressure, rho, sortedPosition, r, mass, hScaled,
+					gradWspikyCoefficient, simulationScale );
+				float4 ddel2V = contributeDel2V( id, velocity_i, neighborParticleId,
+					sortedVelocity, rho_j_inv, r, mass, hScaled, del2WviscosityCoefficient );
+				gradP += dgradP;
+				del2V += ddel2V;
+			}
+			loop = ( ++j < NEIGHBOR_COUNT );
+		}while( loop );
 
-	do{
-		nm = neighborMap[ idk + j ];
-		int neighborParticleId = NEIGHBOR_MAP_ID( nm );
-		bool isNeighbor = ( neighborParticleId != NO_PARTICLE_ID );
-		if( isNeighbor ){
-			float p_j = pressure[ neighborParticleId ];
-			float rho_j_inv = rhoInv[ neighborParticleId ];
-			float r = NEIGHBOR_MAP_DISTANCE( nm );
-			float4 dgradP = contributeGradP( id, neighborParticleId, p_i, p_j, rho_j_inv,
-				position_i, pressure, rho, sortedPosition, r, mass, hScaled,
-				gradWspikyCoefficient, simulationScale );
-			float4 ddel2V = contributeDel2V( id, velocity_i, neighborParticleId,
-				sortedVelocity, rho_j_inv, r, mass, hScaled, del2WviscosityCoefficient );
-			gradP += dgradP;
-			del2V += ddel2V;
-		}
-		loop = ( ++j < NEIGHBOR_COUNT );
-	}while( loop );
+		result = rho_i_inv * ( mu * del2V - gradP );
 
-	result = rho_i_inv * ( mu * del2V - gradP );
+		// Check CFL condition
+		float magnitude = result.x * result.x + result.y * result.y + result.z * result.z;
+		bool tooBig = ( magnitude > CFLLimit * CFLLimit );
+		float sqrtMagnitude = SQRT( magnitude );
+		float scale = CFLLimit / sqrtMagnitude;
+		result = SELECT( result, result * scale, (uint4)tooBig );
 
-	// Check CFL condition
-	float magnitude = result.x * result.x + result.y * result.y + result.z * result.z;
-	bool tooBig = ( magnitude > CFLLimit * CFLLimit );
-	float sqrtMagnitude = SQRT( magnitude );
-	float scale = CFLLimit / sqrtMagnitude;
-	result = SELECT( result, result * scale, (uint4)tooBig );
-
-	result.w = 0.0f;
-	acceleration[ id ] = result;
+		result.w = 0.0f;
+		acceleration[ id ] = result;
+	}
 }
 
 
@@ -958,11 +961,12 @@ __kernel void calculateVolume(__global float8 * position,
 							  )
 {
 	int id = get_global_id(0);
+	int realId = id + LIQUID_PARTICLE_COUNT;
 	int i = 0;
 	float density = 0;
 	float result;
-	while(i < NEIGHBOR_COUNT && NEIGHBOR_MAP_ID(neighborMap[i]) != -1){
-		density += mass * Wshape(NEIGHBOR_MAP_DISTANCE(neighborMap[i]),h,shapedCoeefficient); 
+	while(i < NEIGHBOR_COUNT && NEIGHBOR_MAP_ID(neighborMap[NEIGHBOR_COUNT * realId + i]) != -1){
+		density += mass * Wshape(NEIGHBOR_MAP_DISTANCE(neighborMap[NEIGHBOR_COUNT * realId + i]),h,shapedCoeefficient); 
 		i++;
 	}
 	if(density != 0){
@@ -1068,9 +1072,9 @@ __kernel void calculateElasticForces(__global float8 * position,
 									 __global float4 * acceleration,
 									 float mass)
 {
-	int id = get_global_id(0);
+	//printf("Hello I\n");
+	/**/int id = get_global_id( 0 );
 	int particleId = id + LIQUID_PARTICLE_COUNT;
-	float4 d_ij;
 	int j = 0;
 	float4 u_ji;
 	float4 nullVec = (float4)(0.f,0.f,0.f,0.f);
@@ -1091,15 +1095,18 @@ __kernel void calculateElasticForces(__global float8 * position,
 	float4 row2;
 	float4 row3;
 	float4 force;
+	float4 d1, d2;
 	//float4 jacobianMatrix = (float4)(nullVec, nullVec, nullVec, nullVec);
 	//float4 strainMatrix = (float4)(nullVec, nullVec, nullVec, nullVec);
+	/**/
 	while(j < NEIGHBOR_COUNT && NEIGHBOR_MAP_ID(neighborMap[NEIGHBOR_COUNT * particleId + j]) != -1){
 		neighborId = NEIGHBOR_MAP_ID(neighborMap[NEIGHBOR_COUNT * particleId + j]);
 		if(neighborId >= LIQUID_PARTICLE_COUNT){
-			neighborDistance = NEIGHBOR_MAP_DISTANCE(neighborMap[NEIGHBOR_COUNT * particleId + j]);
-			gradVec = WshapeGrad(neighborDistance,h,gradShapedCoeefficient,position[particleId].lo,position[neighborId].lo,simulationScale);
+			//neighborDistance = NEIGHBOR_MAP_DISTANCE(neighborMap[NEIGHBOR_COUNT * particleId + j]);
+			//gradVec = WshapeGrad(neighborDistance,h,gradShapedCoeefficient,position[particleId].lo,position[neighborId].lo,simulationScale);
+			d1 = displacement[neighborId - LIQUID_PARTICLE_COUNT];
+			d2 = displacement[particleId - LIQUID_PARTICLE_COUNT];
 			u_ji = displacement[neighborId - LIQUID_PARTICLE_COUNT] - displacement[particleId - LIQUID_PARTICLE_COUNT];
-			/**/
 			rowVec.x = gradVec.x;
 			column1.x = u_ji.x;
 			column2.x = u_ji.y;
@@ -1111,8 +1118,6 @@ __kernel void calculateElasticForces(__global float8 * position,
 			rowVec = nullVec;
 			rowVec.z = gradVec.z;
 			gradDisplacement3 += volume[neighborId - LIQUID_PARTICLE_COUNT] * multRowOnColumn(rowVec,column1,column2,column3);
-			
-			/**/
 		}
 		j++;
 	}
@@ -1129,17 +1134,28 @@ __kernel void calculateElasticForces(__global float8 * position,
 	w.z = gradDisplacement3.z;
 	w.w = 0;
 	calcStressJacobianMult(&u,&v,&w,poisson_ratio,young_module,&row1,&row2,&row3);
+	float4 d_ij;
+	j = 0;
 	while(j < NEIGHBOR_COUNT && NEIGHBOR_MAP_ID(neighborMap[NEIGHBOR_COUNT * particleId + j]) != -1){
 		neighborId = NEIGHBOR_MAP_ID(neighborMap[NEIGHBOR_COUNT * particleId + j]);
 		if(neighborId >= LIQUID_PARTICLE_COUNT){
-			d_ij = volume[neighborId - LIQUID_PARTICLE_COUNT];
-			force.x += -2 * volume[particleId] * ( row1.x * d_ij.x + row1.y * d_ij.y + row1.z * d_ij.z );
-			force.y += -2 * volume[particleId] * ( row2.x * d_ij.x + row2.y * d_ij.y + row2.z * d_ij.z );
-			force.z += -2 * volume[particleId] * ( row3.x * d_ij.x + row3.y * d_ij.y + row3.z * d_ij.z );
+			neighborDistance = NEIGHBOR_MAP_DISTANCE(neighborMap[NEIGHBOR_COUNT * particleId + j]);
+			gradVec = WshapeGrad(neighborDistance,h,gradShapedCoeefficient,position[particleId].lo,position[neighborId].lo,simulationScale);
+			d_ij = volume[neighborId - LIQUID_PARTICLE_COUNT] * gradVec;
+			force.x += -2 * volume[particleId - LIQUID_PARTICLE_COUNT] * ( row1.x * d_ij.x + row1.y * d_ij.y + row1.z * d_ij.z );
+			force.y += -2 * volume[particleId - LIQUID_PARTICLE_COUNT] * ( row2.x * d_ij.x + row2.y * d_ij.y + row2.z * d_ij.z );
+			force.z += -2 * volume[particleId - LIQUID_PARTICLE_COUNT] * ( row3.x * d_ij.x + row3.y * d_ij.y + row3.z * d_ij.z );
 			force.w = 0;
 		}
+		j++;
 	}
-	acceleration[particleId] = force / mass;
+	if(id == 0){
+		printf("\n%.f", force.x);
+		printf(", %.f", force.y);
+		printf(", %.f\n", force.z);
+	}
+	acceleration[particleId] = force ;/// mass;
+	/**/
 	//return result;
 }
 
@@ -1170,19 +1186,16 @@ __kernel void integrate(
 	float4 acceleration_ = acceleration[ id ];
 	float4 position_;
 	float4 velocity_;
-	int realId;
-	if(id>LIQUID_PARTICLE_COUNT){
-		realId = elasticParticleCurrentIndex[id - LIQUID_PARTICLE_COUNT];
-	}
-	position_ = sortedPosition[ id ];
-	velocity_ = sortedVelocity[ id ];
+	uint realId;
+	
 	// apply external forces
 	float4 gravity = (float4)( gravity_x, gravity_y, gravity_z, 0.0f );
 	acceleration_ += gravity;
 
 	if(id < LIQUID_PARTICLE_COUNT){
-		
 		// Semi-implicit Euler integration 
+		position_ = sortedPosition[ id ];
+		velocity_ = sortedVelocity[ id ];
 		float4 newVelocity_ = velocity_ + timeStep * acceleration_;
 		float posTimeStep = timeStep * simulationScaleInv; 
 		float4 newPosition_ = position_ + posTimeStep * newVelocity_;
@@ -1199,18 +1212,24 @@ __kernel void integrate(
 	else{//If elastic matter
 		//ElasticForceContribution
 		//Leapfrog integration http://en.wikipedia.org/wiki/Leapfrog_integration
-		float4 prevAcceleration_ = previousAcceleration[realId];
-		
-		/*float4 newVelocity_ = velocity_ + timeStep * (acceleration_ + prevAcceleration_)/2;
+		realId = elasticParticleCurrentIndex[id - LIQUID_PARTICLE_COUNT];
+		float4 prevAcceleration_ = previousAcceleration[id - LIQUID_PARTICLE_COUNT];
+		float4 oldPosition_ = position[id].lo;
+		position_ = sortedPosition[ realId ];
+		velocity_ = sortedVelocity[ realId ];	
+
+		/**/
+		float4 newVelocity_ = velocity_ + timeStep * (acceleration_ + prevAcceleration_)/2;
 		float posTimeStep = timeStep * simulationScaleInv; 
-		float4 newPosition_ = position_ + posTimeStep * posTimeStep * prevAcceleration_ / 2;
+		float4 newPosition_ = position_ + posTimeStep * velocity_ + posTimeStep * posTimeStep * prevAcceleration_ / 2;
 		handleBoundaryConditions( position_, &newVelocity_, posTimeStep, &newPosition_,
 			xmin, xmax, ymin, ymax, zmin, zmax, damping );
 		velocity[ id ] = newVelocity_;
 		position[ id ].x = newPosition_.x;
 		position[ id ].y = newPosition_.y;
 		position[ id ].z = newPosition_.z;
-		previousAcceleration[realId] = acceleration_;
+		previousAcceleration[id - LIQUID_PARTICLE_COUNT] = acceleration_;
+		displacement[id - LIQUID_PARTICLE_COUNT] = newPosition_ - oldPosition_;
 		/**/
 	}
 }
@@ -1229,12 +1248,11 @@ __kernel void sortPostPass(
 						   )
 {
 	int id = get_global_id( 0 );
-	if(id >= LIQUID_PARTICLE_COUNT){
-		
-		elasticParticleCurrentIndex[PI_SERIAL_ID(particleIndex[id]) - LIQUID_PARTICLE_COUNT] = id;
-	}
 	uint2 spi = particleIndex[ id ];//contains id of cell and id of particle it has sorted 
 	int serialId = PI_SERIAL_ID( spi );//get a particle Index
+	if(PI_SERIAL_ID(spi) >= LIQUID_PARTICLE_COUNT){
+		elasticParticleCurrentIndex[PI_SERIAL_ID(spi) - LIQUID_PARTICLE_COUNT] = id;
+	}
 	int cellId = PI_CELL_ID( spi );//get a cell Index
 	float4 position_ = position[ serialId ].lo;
 	POSITION_CELL_ID( position_ ) = (float)cellId;
