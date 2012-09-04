@@ -1150,9 +1150,9 @@ __kernel void calculateElasticForces(__global float8 * position,
 		j++;
 	}
 	if(id == 0){
-		printf("\n%.f", force.x);
-		printf(", %.f", force.y);
-		printf(", %.f\n", force.z);
+		printf("\n%.0000e", force.x);
+		printf(", %.0000e", force.y);
+		printf(", %.0000e\n", force.z);
 	}
 	acceleration[particleId] = force ;/// mass;
 	/**/

@@ -1107,7 +1107,7 @@ void initializeOpenCL(
 	program = cl::Program( context, source );   
 //#ifdef NDEBUG
 /*work*///	err = program.build( devices, "-g -s \"E:\\Distrib\\_OpenWorm related soft\\SPH\\SphFluid_CLGL_original_highlight_neiborhood\\sphFluidDemo.cl\"" );
-/*home SERGEY WORK*/// err = program.build( devices,"-g -s \"C:\\Users\\Serg\\Documents\\GitHub\\Smoothed-Particle-Hydrodynamics\\sphFluidDemo.cl\"" );
+/*work SERGEY WORK*/// err = program.build( devices,"-g -s \"C:\\Users\\Serg\\Documents\\GitHub\\Smoothed-Particle-Hydrodynamics\\sphFluidDemo.cl\"" );
 /*SERGEY LAPTOP*/// err = program.build(devices, "-g -s \"C:\\User\\Seka\\Work\\Smoothed-Particle-Hydrodynamics\\sphFluidDemo.cl\"");
 /*#else*/
 	//err = program.build( devices, "-g" );
@@ -1309,12 +1309,12 @@ int sph_fluid_main_start ( /*int argc, char **argv*/ )
 		//Creation of Elastic body
 		int p = 0;
 		for( int t = 32; (t < 48)&&(p<ELASTIC_PARTICLE_COUNT); t++ )
-			for( int j = 0; (j < 64)&&(p<ELASTIC_PARTICLE_COUNT); j++ )
+			for( int j = 0; (j < 256)&&(p<ELASTIC_PARTICLE_COUNT); j++ )
 				for( int k = 32; (k < 48)&&(p<ELASTIC_PARTICLE_COUNT); k++ )
 				{
 					float x, y, z;
 					float bodyIndex = 0;
-					float r = 0.4f;//2.47;
+					float r = 0.094f;//2.47;
 					x = r * t;
 					y = r * j;
 					z = r * k;
