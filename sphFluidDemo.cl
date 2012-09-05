@@ -878,19 +878,20 @@ __kernel void integrate(
 	// apply external forces
 	float4 gravity = (float4)( gravity_x, gravity_y, gravity_z, 0.f );
 	acceleration_ += gravity;
+	if(id < LIQUID_PARTICLE_COUNT){
+		// Semi-implicit Euler integration 
+		float4 newVelocity_ = velocity_ + timeStep * acceleration_; //newVelocity_.w = 0.f;
+		float posTimeStep = timeStep * simulationScaleInv;			
+		float4 newPosition_ = position_ + posTimeStep * newVelocity_; //newPosition_.w = 0.f;
+		handleBoundaryConditions( position_, &newVelocity_, posTimeStep, &newPosition_,
+			xmin, xmax, ymin, ymax, zmin, zmax, damping );
+		//newPosition_.w = 0.f; // homogeneous coordinate for rendering
+		velocity[ id_source_particle ] = newVelocity_;
+		position[ id_source_particle ] = newPosition_;
 
-	// Semi-implicit Euler integration 
-	float4 newVelocity_ = velocity_ + timeStep * acceleration_; //newVelocity_.w = 0.f;
-	float posTimeStep = timeStep * simulationScaleInv;			
-	float4 newPosition_ = position_ + posTimeStep * newVelocity_; //newPosition_.w = 0.f;
-
-	handleBoundaryConditions( position_, &newVelocity_, posTimeStep, &newPosition_,
-		xmin, xmax, ymin, ymax, zmin, zmax, damping );
-
-	//newPosition_.w = 0.f; // homogeneous coordinate for rendering
-
-	velocity[ id_source_particle ] = newVelocity_;
-	position[ id_source_particle ] = newPosition_;
+	}else{
+	
+	}
 }
 
 

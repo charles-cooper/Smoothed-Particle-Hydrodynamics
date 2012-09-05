@@ -156,6 +156,8 @@ cl::Buffer sortedPosition;// size * 2
 cl::Buffer sortedVelocity;
 cl::Buffer velocity;
 
+cl::Buffer elasticNeighbourCount; // PLace where we save numbers of neighbours for particular elastic particle
+
 // Kernels
 cl::Kernel clearBuffers;
 cl::Kernel computeAcceleration;
@@ -547,7 +549,7 @@ _run_pcisph_integrate( cl::CommandQueue queue){
 	pcisph_integrate.setArg( 18, velocity );
 	pcisph_integrate.setArg( 19, rho );
 	queue.enqueueNDRangeKernel(
-		pcisph_integrate, cl::NullRange, cl::NDRange( (int) ( PARTICLE_COUNT ) ),
+		pcisph_integrate, cl::NullRange, cl::NDRange( (int) ( LIQUID_PARTICLE_COUNT ) ),
 #if defined( __APPLE__ )
 		cl::NullRange, NULL, NULL );
 #else
@@ -582,7 +584,7 @@ _run_pcisph_predictPositions( cl::CommandQueue queue){
 	pcisph_predictPositions.setArg( 17, position );
 	pcisph_predictPositions.setArg( 18, velocity );
 	queue.enqueueNDRangeKernel(
-		pcisph_predictPositions, cl::NullRange, cl::NDRange( (int) ( PARTICLE_COUNT ) ),
+		pcisph_predictPositions, cl::NullRange, cl::NDRange( (int) ( LIQUID_PARTICLE_COUNT ) ),
 #if defined( __APPLE__ )
 		cl::NullRange, NULL, NULL );
 #else
@@ -713,7 +715,7 @@ _run_pcisph_predictDensity( cl::CommandQueue queue ){
 	pcisph_predictDensity.setArg(12, rhoInv );
 	pcisph_predictDensity.setArg(13, delta );
 	queue.enqueueNDRangeKernel(
-		pcisph_predictDensity, cl::NullRange, cl::NDRange( (int) ( PARTICLE_COUNT ) ),
+		pcisph_predictDensity, cl::NullRange, cl::NDRange( (int) ( LIQUID_PARTICLE_COUNT ) ),
 #if defined( __APPLE__ )
 		cl::NullRange, NULL, NULL );
 #else
@@ -743,7 +745,7 @@ _run_pcisph_correctPressure( cl::CommandQueue queue ){
 	pcisph_correctPressure.setArg(12, rhoInv );
 	pcisph_correctPressure.setArg(13, delta );
 	queue.enqueueNDRangeKernel(
-		pcisph_correctPressure, cl::NullRange, cl::NDRange( (int) ( PARTICLE_COUNT ) ),
+		pcisph_correctPressure, cl::NullRange, cl::NDRange( (int) ( LIQUID_PARTICLE_COUNT ) ),
 #if defined( __APPLE__ )
 		cl::NullRange, NULL, NULL );
 #else
@@ -1210,7 +1212,7 @@ void initializeOpenCL(
 */
 
 	//0-CPU, 1-GPU// depends on order appropriet drivers was instaled
-	int plList=1;//selected platform index in platformList array
+	int plList=0;//selected platform index in platformList array
 
 	cl_context_properties cprops[3] = { CL_CONTEXT_PLATFORM, (cl_context_properties) (platformList[plList])(), 0 };
 
@@ -1275,7 +1277,7 @@ void initializeOpenCL(
 int sph_fluid_main_start ( /*int argc, char **argv*/ )
 {
 	int err;
-	positionBuffer = new float[ 8 * PARTICLE_COUNT ];
+	positionBuffer = new float[ 4 * PARTICLE_COUNT ];
 	velocityBuffer = new float[ 4 * PARTICLE_COUNT ];
 
 	neighborMapBuffer = new float[( NK * sizeof( float ) * 2 )];
@@ -1326,7 +1328,7 @@ int sph_fluid_main_start ( /*int argc, char **argv*/ )
 		if( err != CL_SUCCESS ){
 			throw std::runtime_error( "buffer particleIndexBack creation failed" );
 		}
-		position = cl::Buffer( context, CL_MEM_READ_WRITE, ( PARTICLE_COUNT * sizeof( float ) * 4 ), NULL, &err );
+		position = cl::Buffer( context, CL_MEM_READ_WRITE, ( PARTICLE_COUNT * sizeof( float ) * 4 ), NULL, &err );//First 3 components consit coordinates 4 index of cell in which particle located in this time, other nesser for ellastic matter
 		if( err != CL_SUCCESS ){
 			throw std::runtime_error( "buffer position creation failed" );
 		}
@@ -1462,17 +1464,17 @@ int sph_fluid_main_start ( /*int argc, char **argv*/ )
 		//float cGrad = 1.0;
 
 		x = 0*XMAX/4+h/(2*coeff);
-		y = h/(2*coeff);
+		y = h/(2*coeff) + YMAX/2;
 		z = h/(2*coeff);
-
-		for( int i = 0; i < PARTICLE_COUNT; ++i )
+		int i = 0;
+		for( i = 0; i < LIQUID_PARTICLE_COUNT; ++i )
 		{
 			float * positionVector = positionBuffer + 4 * i;
 			positionVector[ 0 ] = x;
 			positionVector[ 1 ] = y;
 			positionVector[ 2 ] = z;
 			positionVector[ 3 ] = 0;
-
+	
 			float * velocityVector = velocityBuffer + 4 * i;
 			velocityVector[ 0 ] = 0;
 			velocityVector[ 1 ] = 0;
@@ -1484,7 +1486,31 @@ int sph_fluid_main_start ( /*int argc, char **argv*/ )
 			if(x>XMAX*3/8) { x = 0*XMAX/4+h/(2*coeff); z += h/coeff; }
 			if(z>ZMAX) { x = 0*XMAX/4+h/(2*coeff); z=h/(2*coeff); y += h/coeff; }
 		}
-		
+		//Creation of Elastic body
+		int p = 0;
+		for( int t = 0; (t < 32)&&(p<ELASTIC_PARTICLE_COUNT); t++ )
+			for( int j = 0; (j < 16)&&(p<ELASTIC_PARTICLE_COUNT); j++ )
+				for( int k = 0; (k < 16)&&(p<ELASTIC_PARTICLE_COUNT); k++ )
+				{
+					float x, y, z;
+					float bodyIndex = 0;
+					float r = 1.2f;//2.47;
+					x = r * t;
+					y = r * j;
+					z = r * k;
+					float * positionVector = positionBuffer + 4 * i;
+					positionVector[ 0 ] = x;
+					positionVector[ 1 ] = y;
+					positionVector[ 2 ] = z;
+					positionVector[ 3 ] = 0;
+					float * velocityVector = velocityBuffer + 4 * i;
+					velocityVector[ 0 ] = 0;
+					velocityVector[ 1 ] = 0;
+					velocityVector[ 2 ] = 0;
+					velocityVector[ 3 ] = 0;
+					p++;
+					i++;
+				}
 
 		err = queue.enqueueWriteBuffer( position, CL_TRUE, 0, PARTICLE_COUNT * sizeof( float ) * 4, positionBuffer );
 		if( err != CL_SUCCESS ){

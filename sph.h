@@ -4,6 +4,10 @@
 #define PARTICLE_COUNT ( 1024*32/*16*/ )
 #define NEIGHBOR_COUNT 32
 
+//Identify how many of liquid particle we have and how many elastic particles
+#define LIQUID_PARTICLE_COUNT ( 16 * 1024 )
+#define ELASTIC_PARTICLE_COUNT ( PARTICLE_COUNT - LIQUID_PARTICLE_COUNT )
+
 #define PCISPH 1 // change to 0 for ordinary SPH
 //int PCISPH = 1;
 
