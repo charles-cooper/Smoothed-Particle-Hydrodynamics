@@ -175,6 +175,8 @@ cl::Kernel pcisph_predictPositions;
 cl::Kernel pcisph_predictDensity;
 cl::Kernel pcisph_correctPressure;
 cl::Kernel pcisph_computePressureForceAcceleration;
+//addition kernels for Elastic Matter
+cl::Kernel findNeighborFotElasticParticle;
 /*//AP2012
 #ifdef NDEBUG
 amd::RadixSortCL radixSort;
@@ -230,6 +232,7 @@ unsigned int
 _runClearBuffers( cl::CommandQueue queue ){
 	// Stage ClearBuffers
 	clearBuffers.setArg( 0, neighborMap );
+	clearBuffers.setArg( 1, elasticNeighbourCount );
 	queue.enqueueNDRangeKernel(
 		clearBuffers, cl::NullRange, cl::NDRange( (int) ( PARTICLE_COUNT ) ),
 #if defined( __APPLE__ )
@@ -243,7 +246,25 @@ _runClearBuffers( cl::CommandQueue queue ){
 	return 0;
 }
 
-
+unsigned int
+_runFindNeighborFotElasticParticle( cl::CommandQueue queue ){
+	findNeighborFotElasticParticle.setArg( 0, position );
+	findNeighborFotElasticParticle.setArg( 1, h );
+	findNeighborFotElasticParticle.setArg( 2, neighborMap );
+	findNeighborFotElasticParticle.setArg( 3, simulationScale );
+	findNeighborFotElasticParticle.setArg( 4, elasticNeighbourCount );
+	queue.enqueueNDRangeKernel(
+		findNeighborFotElasticParticle, cl::NullRange, cl::NDRange( (int) ( ELASTIC_PARTICLE_COUNT ) ),
+#if defined( __APPLE__ )
+		cl::NullRange, NULL, NULL );
+#else
+		cl::NDRange( (int)( 256 ) ), NULL, NULL );
+#endif
+#ifdef QUEUE_EACH_KERNEL
+	queue.finish();
+#endif
+	return 0;
+}
 
 unsigned int
 _runComputeAcceleration( cl::CommandQueue queue ){
@@ -1026,7 +1047,13 @@ void step(int nIter)
 	printf("\n");
 
 	/* THIS IS COMMON PART FOR BOTH SPH AND PCISPH*/
-
+	if(nIter == 1){
+		_runFindNeighborFotElasticParticle ( queue ); 
+		queue.finish(); QueryPerformanceCounter(&t2); 
+		printf("_runFindNeighborFotElasticParticle: \t%9.3f ms\n",				
+		(t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart); t1 = t2;
+		
+	}
 	_runClearBuffers( queue ); queue.finish();			 QueryPerformanceCounter(&t2); printf("_runClearBuffers: \t%9.3f ms\n",				(t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart); t1 = t2;
 
 	_runHashParticles( queue ); queue.finish();			 QueryPerformanceCounter(&t2); printf("_runHashParticles: \t%9.3f ms\n",			(t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart); t1 = t2;
@@ -1259,9 +1286,10 @@ void initializeOpenCL(
 /*homeS*/ // err = program.build( devices,"-g -s \"C:\\Users\\Sergey\\Desktop\\SphFluid_CLGL_myNeighborhoodSearch_12may2012\\sphFluidDemo.cl\"" );
 /*homeA*/   // err = program.build( devices, "-g -s \"D:\\_OpenWorm\\SphFluid_CLGL_original_32nearest_PCI\\sphFluidDemo.cl\"" );
 	//D:\_OpenWorm\SphFluid_CLGL_original_32nearest_PCI
+/*home Sergey laptop*/  err = program.build( devices, "-g -s \"C:\\Users\\Julia\\Documents\\GitHub\\Smoothed-Particle-Hydrodynamics\\sphFluidDemo.cl\"");
 /*#else*/
 	//err = program.build( devices, "-g" );
-	err = program.build( devices, "" );
+	//err = program.build( devices, "" );
 /*#endif*/
 	if( err != CL_SUCCESS ){
 		std::string compilationErrors;
@@ -1356,7 +1384,11 @@ int sph_fluid_main_start ( /*int argc, char **argv*/ )
 		if( err != CL_SUCCESS ){
 			throw std::runtime_error( "buffer velocity creation failed" );
 		}
-
+		
+		elasticNeighbourCount = cl::Buffer(context,CL_MEM_READ_WRITE,(ELASTIC_PARTICLE_COUNT * sizeof(int) * 1), NULL, &err);
+		if(err != CL_SUCCESS){
+			throw std::runtime_error("buffer elasticNeighbourCount creation failed");
+		}
 		// create kernels
 		clearBuffers = cl::Kernel( program, "clearBuffers", &err );
 		if( err != CL_SUCCESS ){
@@ -1425,9 +1457,11 @@ int sph_fluid_main_start ( /*int argc, char **argv*/ )
 		if( err != CL_SUCCESS ){
 			throw std::runtime_error( "kernel pcisph_computeDensity creation failed" );
 		}
-
-
-
+		//addition for elastic matter
+		findNeighborFotElasticParticle = cl::Kernel(program, "findNeighborFotElasticParticle", &err);
+		if( err != CL_SUCCESS){
+			throw std::runtime_error("kernel findNeighborFotElasticParticle creation failed");		
+		}
 /*
 		for( int i = 0; i < PARTICLE_COUNT; ++i ){
 			float x, y, z;

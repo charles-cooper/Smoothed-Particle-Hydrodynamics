@@ -25,6 +25,7 @@
 #define SQRT( x ) native_sqrt( x )
 #define DOT( a, b ) dot( a, b )
 
+#define radius_segments 30
 
 #if 1
 #define SELECT( A, B, C ) select( A, B, (C) * 0xffffffff )
@@ -35,35 +36,143 @@
 //#pragma OPENCL EXTENSION cl_amd_printf : enable
 
 __kernel void clearBuffers(
-						   __global float2 * neighborMap
+						   __global float2 * neighborMap,
+						   __global int * elasticNeighbourCount
 						   )
 {
 	int id = get_global_id( 0 );
 	__global float4 * nm = (__global float4 *)neighborMap;
 	int outIdx = ( id * NEIGHBOR_COUNT ) >> 1;//int4 versus int2 addressing
 	float4 fdata = (float4)( -1, -1, -1, -1 );
-
-	nm[ outIdx++ ] = fdata;
-	nm[ outIdx++ ] = fdata;
-	nm[ outIdx++ ] = fdata;
-	nm[ outIdx++ ] = fdata;
-	nm[ outIdx++ ] = fdata;
-	nm[ outIdx++ ] = fdata;
-	nm[ outIdx++ ] = fdata;
-	nm[ outIdx++ ] = fdata;
-	nm[ outIdx++ ] = fdata;
-	nm[ outIdx++ ] = fdata;
-	nm[ outIdx++ ] = fdata;
-	nm[ outIdx++ ] = fdata;
-	nm[ outIdx++ ] = fdata;
-	nm[ outIdx++ ] = fdata;
-	nm[ outIdx++ ] = fdata;
-	nm[ outIdx++ ] = fdata;
+	if(id < LIQUID_PARTICLE_COUNT){
+		nm[ outIdx++ ] = fdata;
+		nm[ outIdx++ ] = fdata;
+		nm[ outIdx++ ] = fdata;
+		nm[ outIdx++ ] = fdata;
+		nm[ outIdx++ ] = fdata;
+		nm[ outIdx++ ] = fdata;
+		nm[ outIdx++ ] = fdata;
+		nm[ outIdx++ ] = fdata;
+		nm[ outIdx++ ] = fdata;
+		nm[ outIdx++ ] = fdata;
+		nm[ outIdx++ ] = fdata;
+		nm[ outIdx++ ] = fdata;
+		nm[ outIdx++ ] = fdata;
+		nm[ outIdx++ ] = fdata;
+		nm[ outIdx++ ] = fdata;
+		nm[ outIdx++ ] = fdata;
+	}else{
+		//For Elastic Particle clear only liquid items in neighborMap 
+		int i = elasticNeighbourCount[id - LIQUID_PARTICLE_COUNT];
+		while( i < NEIGHBOR_COUNT){
+			nm[ i ] = fdata;
+			i++;
+		}
+	}
 }
 
 
+/*SERCH OF NEIGBOR FOR ELASTIC PARTICLE IT RUNS ONCE IN START*/
 
+int searchNeighborForElasticParticle(int particleId, 
+									 __global float4 * position,
+									 __global float2 * neighborMap,
+								     float h,
+								     float simulationScale,
+								     int mode,
+								     int * radius_distrib,
+								     float r_thr){
+	int particleCountThisCell = ELASTIC_PARTICLE_COUNT;
+	int potentialNeighbors = particleCountThisCell;
+	int foundCount = 0;
+	float4 position_ = position[ particleId ];
+	bool loop = true;
+	int i = 0,j;
+	float distance,distanceSquared;
+	float r_thr_Squared = r_thr*r_thr;
+	float2 neighbor_data;
+	int neighborParticleId;
+	int myOffset;
+	while( i < particleCountThisCell ){
 
+		neighborParticleId = LIQUID_PARTICLE_COUNT + i;
+		
+		//if(myParticleId == neighborParticleId) continue;
+
+		if(particleId != neighborParticleId )
+		{
+			float4 d = position_ - position[ neighborParticleId ];
+			d.w = 0.0f;
+			distanceSquared = DOT( d, d );
+			if( distanceSquared <= r_thr_Squared )
+			{
+				distance = SQRT( distanceSquared );
+				j = (int)(distance*radius_segments/h);
+				if(j<radius_segments) 
+					radius_distrib[j]++;
+				if(mode)
+				{
+					myOffset = foundCount;
+					neighbor_data.x = neighborParticleId;
+					neighbor_data.y = distance* simulationScale;
+					if(myOffset < NEIGHBOR_COUNT)
+						neighborMap[ particleId*NEIGHBOR_COUNT + myOffset ] = neighbor_data;
+					else
+						break;
+					foundCount++;
+				}
+			}
+		
+		}
+		i++;
+	}//while
+	return foundCount;
+}
+__kernel void findNeighborFotElasticParticle(__global float4 * position,
+											 float h,
+											 __global float2 * neighborMap,
+											  float simulationScale,
+											 __global int * elasticNeighbourCount )
+{
+	int posId = get_global_id(0);
+	int id = posId + LIQUID_PARTICLE_COUNT;
+	//int objectId = (int)position[id].s4; future work
+	float distance = 0;	
+	int i = 0,j;
+	int foundCount = 0;
+	int mode = 0;
+	int distrib_sum = 0;
+	int radius_distrib[radius_segments];
+	float r_thr = h;
+	while( i<radius_segments )
+	{
+		radius_distrib[i]=0;
+		i++;
+	}
+	while( mode<2 )
+	{
+		foundCount = searchNeighborForElasticParticle(id,position,neighborMap,h,simulationScale,mode,&radius_distrib,r_thr);
+		if(mode==0)
+		{
+			j=0;
+
+			while(j<radius_segments)
+			{
+				distrib_sum += radius_distrib[j];
+				if(distrib_sum==32) break;
+				if(distrib_sum> 32) { j--; break; }
+				j++;
+			}
+
+			r_thr = (j+1)*h/radius_segments;
+
+		}
+
+		mode++;
+	}
+	elasticNeighbourCount[posId] = foundCount;
+}
+/**/
 
 // Gradient of equation 21.  Vector result.
 
@@ -434,7 +543,7 @@ uint myRandom(
 }
 
 
-#define radius_segments 30
+
 
 
 int searchForNeighbors( 
