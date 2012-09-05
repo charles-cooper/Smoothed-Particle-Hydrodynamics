@@ -1020,14 +1020,14 @@ void calcStressJacobianMult(float4 * u,
 	float s_xx, s_yy, s_zz, s_xy, s_yz, s_zx;
 	float ratio = young_module / ((1+poison_ratio)*(1-2*poison_ratio));
 	float4 result;
-	//Strain Tensor
+	//Strain Tensor "Point Based Animation of Elastic, Plastic and Melting Objects" Muller 2004 APENDIX A
 	e_xx = 2 * u->x + u->x * u->x + v->x * v->x + w->x * w->x;
 	e_yy = 2 * v->y + u->y * u->y + v->y * v->y + w->y * w->y;
 	e_zz = 2 * w->z + u->z * u->z + v->z * v->z + w->z * w->z;
 	e_xy = u->y + v->x + u->x *u->y + v->x * v->y + w->z * w->y;
 	e_yz = v->z + w->y + u->y * u->z + v->y * v->z + w->y * w->z;
 	e_zx = w->y + u->z + u->z * u->x + v->z * v->x + w->z * w->x;
-	//STRESS TENSOR
+	//STRESS TENSOR http://en.wikipedia.org/wiki/Hook%27s_law#Isotropic_materials
 	s_xx = ratio * ( (1-poison_ratio) * e_xx + poison_ratio * e_yy + poison_ratio * e_zz);
 	s_yy = ratio * ( poison_ratio * e_xx + (1-poison_ratio) * e_yy + poison_ratio * e_zz);
 	s_zz = ratio * ( poison_ratio * e_xx + poison_ratio * e_yy + (1 - poison_ratio) * e_zz);
@@ -1038,7 +1038,7 @@ void calcStressJacobianMult(float4 * u,
 	u->x += 1.f;
 	v->y += 1.f;
 	w->z += 1.f;
-	//F = -2Vj *J *s *dij
+	//J *s
 	//First ROW
 	row1->x = u->x * s_xx + u->y * s_xy + u->z * s_zx;
 	row1->y = u->x * s_xy + u->y * s_yy + u->z * s_yz;
@@ -1136,6 +1136,7 @@ __kernel void calculateElasticForces(__global float8 * position,
 	calcStressJacobianMult(&u,&v,&w,poisson_ratio,young_module,&row1,&row2,&row3);
 	float4 d_ij;
 	j = 0;
+	//F = -2Vj *J *s *dij
 	while(j < NEIGHBOR_COUNT && NEIGHBOR_MAP_ID(neighborMap[NEIGHBOR_COUNT * particleId + j]) != -1){
 		neighborId = NEIGHBOR_MAP_ID(neighborMap[NEIGHBOR_COUNT * particleId + j]);
 		if(neighborId >= LIQUID_PARTICLE_COUNT){
@@ -1150,11 +1151,12 @@ __kernel void calculateElasticForces(__global float8 * position,
 		j++;
 	}
 	if(id == 0){
-		printf("\n%.0000e", force.x);
-		printf(", %.0000e", force.y);
-		printf(", %.0000e\n", force.z);
+		printf("\n%0.0000e", force.x);
+		printf(", %0.0000e", force.y);
+		printf(", %0.0000e\n", force.z);
 	}
-	acceleration[particleId] = force ;/// mass;
+	float4 accel = force / mass;
+	acceleration[particleId] = accel;
 	/**/
 	//return result;
 }
@@ -1228,8 +1230,9 @@ __kernel void integrate(
 		position[ id ].x = newPosition_.x;
 		position[ id ].y = newPosition_.y;
 		position[ id ].z = newPosition_.z;
+		float4 disp = newPosition_ - oldPosition_;
 		previousAcceleration[id - LIQUID_PARTICLE_COUNT] = acceleration_;
-		displacement[id - LIQUID_PARTICLE_COUNT] = newPosition_ - oldPosition_;
+		displacement[id - LIQUID_PARTICLE_COUNT] = disp;
 		/**/
 	}
 }

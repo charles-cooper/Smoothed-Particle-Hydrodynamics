@@ -68,8 +68,8 @@ const float gravity_x = 0.0f;
 const float gravity_y = -9.8f;
 const float gravity_z = 0.0f;
 
-const float young_module = 0.5f;//http://en.wikipedia.org/wiki/Young_modulus for rubber
-const float poisson_ratio = 0.7;//http://en.wikipedia.org/wiki/Poisson%27s_ratio for rubber
+const float young_module = 0.05f * 1000000000;//http://en.wikipedia.org/wiki/Young_modulus for rubber http://www.engineeringtoolbox.com/young-modulus-d_417.html
+const float poisson_ratio = 0.3;//http://en.wikipedia.org/wiki/Poisson%27s_ratio for rubber http://www.engineeringtoolbox.com/poissons-ratio-d_1224.html
 
 const float shapedCoeefficient = M_PI/(8*h*h*h*h*(M_PI/3 - 8/M_PI + 16/(M_PI*M_PI))) * (2*h)/M_PI;// p. 66 [Sol]
 const float gradShapedCoeefficient = M_PI/(8*h*h*h*h*(M_PI/3 - 8/M_PI + 16/(M_PI*M_PI)));
