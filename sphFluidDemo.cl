@@ -170,7 +170,7 @@ __kernel void findNeighborFotElasticParticle(__global float4 * position,
 
 		mode++;
 	}
-	elasticNeighbourCount[posId] = foundCount;
+	elasticNeighbourCount[posId] = 0;//foundCount;
 }
 /**/
 
@@ -597,6 +597,8 @@ int searchForNeighbors(
 					if(mode)
 					{
 						myOffset = NEIGHBOR_COUNT - spaceLeft + foundCount;
+						if(myOffset >= NEIGHBOR_COUNT)
+							break;
 						neighbor_data.x = neighborParticleId;
 						neighbor_data.y = _distance * simulationScale; // scaled, OK
 						neighborMap[ myParticleId*NEIGHBOR_COUNT + myOffset ] = neighbor_data;
@@ -649,8 +651,8 @@ __kernel void findNeighbors(
 							float ymin,
 							float zmin,
 							__global float2 * neighborMap,
-							__global float * elasticNeighbourCount,
-							__global float * particleIndexBack
+							__global int * elasticNeighbourCount,
+							__global uint * particleIndexBack
 							)
 {
 	__global uint * gridCellIndex = gridCellIndexFixedUp;
