@@ -414,6 +414,8 @@ _runFindNeighbors( cl::CommandQueue queue ){
 	findNeighbors.setArg( 11, ymin );
 	findNeighbors.setArg( 12, zmin );
 	findNeighbors.setArg( 13, neighborMap );
+	findNeighbors.setArg( 14, elasticNeighbourCount );
+	findNeighbors.setArg( 15, particleIndexBack );
 	queue.enqueueNDRangeKernel(
 		findNeighbors, cl::NullRange, cl::NDRange( (int) ( PARTICLE_COUNT ) ),
 #if defined( __APPLE__ )
@@ -1047,13 +1049,14 @@ void step(int nIter)
 	printf("\n");
 
 	/* THIS IS COMMON PART FOR BOTH SPH AND PCISPH*/
-	if(nIter == 1){
+	/**/if(nIter == 1){
 		_runFindNeighborFotElasticParticle ( queue ); 
 		queue.finish(); QueryPerformanceCounter(&t2); 
 		printf("_runFindNeighborFotElasticParticle: \t%9.3f ms\n",				
 		(t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart); t1 = t2;
 		
 	}
+	/**/
 	_runClearBuffers( queue ); queue.finish();			 QueryPerformanceCounter(&t2); printf("_runClearBuffers: \t%9.3f ms\n",				(t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart); t1 = t2;
 
 	_runHashParticles( queue ); queue.finish();			 QueryPerformanceCounter(&t2); printf("_runHashParticles: \t%9.3f ms\n",			(t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart); t1 = t2;
@@ -1286,10 +1289,10 @@ void initializeOpenCL(
 /*homeS*/ // err = program.build( devices,"-g -s \"C:\\Users\\Sergey\\Desktop\\SphFluid_CLGL_myNeighborhoodSearch_12may2012\\sphFluidDemo.cl\"" );
 /*homeA*/   // err = program.build( devices, "-g -s \"D:\\_OpenWorm\\SphFluid_CLGL_original_32nearest_PCI\\sphFluidDemo.cl\"" );
 	//D:\_OpenWorm\SphFluid_CLGL_original_32nearest_PCI
-/*home Sergey laptop*/  err = program.build( devices, "-g -s \"C:\\Users\\Julia\\Documents\\GitHub\\Smoothed-Particle-Hydrodynamics\\sphFluidDemo.cl\"");
+/*home Sergey laptop*///  err = program.build( devices, "-g -s \"C:\\Users\\Julia\\Documents\\GitHub\\Smoothed-Particle-Hydrodynamics\\sphFluidDemo.cl\"");
 /*#else*/
 	//err = program.build( devices, "-g" );
-	//err = program.build( devices, "" );
+	err = program.build( devices, "" );
 /*#endif*/
 	if( err != CL_SUCCESS ){
 		std::string compilationErrors;

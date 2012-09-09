@@ -65,7 +65,7 @@ __kernel void clearBuffers(
 		//For Elastic Particle clear only liquid items in neighborMap 
 		int i = elasticNeighbourCount[id - LIQUID_PARTICLE_COUNT];
 		while( i < NEIGHBOR_COUNT){
-			nm[ i ] = fdata;
+			neighborMap[ id * NEIGHBOR_COUNT + i ] = (float2)( -1, -1 );
 			i++;
 		}
 	}
@@ -648,7 +648,9 @@ __kernel void findNeighbors(
 							float xmin,
 							float ymin,
 							float zmin,
-							__global float2 * neighborMap
+							__global float2 * neighborMap,
+							__global float * elasticNeighbourCount,
+							__global float * particleIndexBack
 							)
 {
 	__global uint * gridCellIndex = gridCellIndexFixedUp;
@@ -662,7 +664,15 @@ __kernel void findNeighbors(
 	int radius_distrib[radius_segments];
 	int i=0,j;
 	float r_thr = h;
-	
+	bool is_elastic = false;
+	//CHECK IF PARTICLE IS ELASTIC IT MEANS THAT ID >= LIQUID_PARTICLE_COUNT, IF IT IS TRUE THAN WE CHECK NUMBER OF ITS NEIGHBOR
+	if(id>=LIQUID_PARTICLE_COUNT){
+		if(elasticNeighbourCount[id - LIQUID_PARTICLE_COUNT]>=NEIGHBOR_COUNT)
+			return;
+		is_elastic = true;
+		foundCount = elasticNeighbourCount[id - LIQUID_PARTICLE_COUNT];
+	}
+
 	while( i<radius_segments )
 	{
 		radius_distrib[i]=0;
