@@ -20,35 +20,52 @@ float rotX = 0.0f;    // Rotate screen on x axis
 float rotY = 0.0f;    // Rotate screen on y axis
 float rotZ = 0.0f;    // Rotate screen on z axis
 bool lbutton = false;
-float sc = 0.044;//0.045;//0.07
+float sc = 0.025;//0.0145;//0.045;//0.07
 Vector3D ort1(1,0,0),ort2(0,1,0),ort3(0,0,1);
 //bool mouse_event = false; // need to reDraw
 //extern int particleCount;
 extern float * positionBuffer;
 extern float * neighborMapBuffer;
 extern unsigned int * particleIndexBuffer;
-
+extern float * densityBuffer;
+extern float * velocityBuffer;
+extern double elapsedTime;
+double graphTime;
+double totalTime = 0;
 int frames_counter = 0;
 
-extern int sph_fluid_main_start ();
-extern void sph_fluid_main_step ();
-extern void sph_fluid_main_stop ();
+int winIdMain;                                       /* Main Window handle         */
+int winIdSub;                                        /* Sub-Window handle          */
+
+extern int simulation_start ();
+extern void simulation_step ();
+extern void simulation_stop ();
+extern double stopwatch_report(const char *str);
 
 int pId = 123;//1021;//1234
- 
-GLvoid display(GLvoid)
+int frameCount = 0;
+double prevTime;
+double fps;
+GLvoid *font_style = GLUT_BITMAP_TIMES_ROMAN_24;
+
+void calculateFPS();
+
+#if defined(_WIN32) || defined (_WIN64)
+	extern LARGE_INTEGER frequency;				// ticks per second
+	extern LARGE_INTEGER t1, t2;					// ticks
+#elif defined(__linux__)
+	extern timespec t1, t2;				// ticks
+#endif
+void display(void)
 {
-
-	LARGE_INTEGER frequency;				// ticks per second
-    LARGE_INTEGER t1, t2;					// ticks
-    QueryPerformanceFrequency(&frequency);	// get ticks per second
-    QueryPerformanceCounter(&t1);			// start timer
-
-	frames_counter++;
-	int c = clock();
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);	// Очищается буфер кадра и буфер глубины
-
+#if defined(_WIN32) || defined (_WIN64)
+	QueryPerformanceFrequency(&frequency);	// get ticks per second
+	QueryPerformanceCounter(&t1);			// start timer
+#elif defined(__linux__)
+	clock_gettime(CLOCK_MONOTONIC_RAW, &t1);
+#endif
 	
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);	// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 	Vector3D vcenter(0,0,0);
 	Vector3D vbox[8];
 
@@ -67,7 +84,7 @@ GLvoid display(GLvoid)
 	vbox[5] = Vector3D(XMAX,YMIN,ZMAX);
 	vbox[6] = Vector3D(XMAX,YMAX,ZMAX);
 	vbox[7] = Vector3D(XMIN,YMAX,ZMAX);
-	//sph_fluid_main_step();
+	//simulation_step();
 	glBegin(GL_LINES);
 
 	sc *=10;
@@ -155,8 +172,8 @@ GLvoid display(GLvoid)
 /*
     GLfloat material_diffuse[] = {1.0, 1.0, 1.0, 1.0};
     glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, material_diffuse);
-    // установка источников света
-    // направленный источник света
+    // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ
+    // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ
 
     GLfloat light0_diffuse[] = {0.7, 0.7, 1.0};
     GLfloat light0_direction[] = {0.0, 0.0, 1.0, 0.0};
@@ -223,11 +240,12 @@ GLvoid display(GLvoid)
 	float rho0 = 1000;
 	glBegin(GL_POINTS);
 	float dc;
-
+	float x,z,y;
 	//glEnable(GL_POINT_SMOOTH);
 	for(int i = 0; i<PARTICLE_COUNT; i++)
 	{
-		rho = positionBuffer[i*4+3];
+		//rho = positionBuffer[i*4+3];
+		rho = densityBuffer[ particleIndexBuffer[i*2+0] ];
 		if(rho<0) rho=0;
 		if(rho>2*rho0) rho=2*rho0;
 
@@ -249,21 +267,43 @@ GLvoid display(GLvoid)
 		if( (dc=100*(rho-rho0*1.02f)/rho0) >0 )	glColor4f(  dc,   1,   0,1.0f);//yellow
 		if( (dc=100*(rho-rho0*1.03f)/rho0) >0 )	glColor4f(   1,1-dc,   0,1.0f);//red
 		if( (dc=100*(rho-rho0*1.04f)/rho0) >0 )	glColor4f(   1,   0,   0,1.0f);
-		//if(rho>rho0*1.01f) glColor3f(1.0,0.5,0.0);
-
-		//GLfloat vert[] = {0.f,0.f,0.f};
-		glPushMatrix();
-		//glVertex3fv(vert);
-		//glTranslated( (positionBuffer[i*4]-XMAX/2)*sc , (positionBuffer[i*4+1]-YMAX/2)*sc, (positionBuffer[i*4+2]-ZMAX/2)*sc );
-		//distrib[(int)(positionBuffer[i*4]*300/XMAX)]+=1.f;
-		//glutWireSphere( 1.0, 8, 8 );
-		glVertex3f((positionBuffer[i*4]-XMAX/2)*sc , (positionBuffer[i*4+1]-YMAX/2)*sc, (positionBuffer[i*4+2]-ZMAX/2)*sc );
-		//glutSolidSphere( 0.3*sc, 6, 6 );
-
-		glPopMatrix();
+		if((int)positionBuffer[i*4+3]!=3)//show only fluid particles
+		{
+			glBegin(GL_POINTS);
+			if((int)positionBuffer[i*4+3]==2) glColor4f(   1,   1,   0,  1.0f);
+			glVertex3f((positionBuffer[i*4]-XMAX/2)*sc , (positionBuffer[i*4+1]-YMAX/2)*sc, (positionBuffer[i*4+2]-ZMAX/2)*sc );
+			glEnd();
+		}
+		else{
+			
+			/*{
+				glColor4f(  0,  1,  1, 1.0f);//blue
+				glBegin(GL_LINES);
+				  x =  positionBuffer[ i * 4 ] + velocityBuffer[i * 4];
+				  y =  positionBuffer[ i * 4 + 1] + velocityBuffer[i * 4 + 1];
+				  z =  positionBuffer[ i * 4 + 2] + velocityBuffer[i * 4 + 2];
+				  glVertex3f((positionBuffer[i*4]-XMAX/2)*sc , (positionBuffer[i*4+1]-YMAX/2)*sc, (positionBuffer[i*4+2]-ZMAX/2)*sc );
+				  glVertex3f((x-XMAX/2)*sc , (y-YMAX/2)*sc, (z-ZMAX/2)*sc );
+				glEnd();
+			}*/
+		}
+		
 	}
 	glEnd();
 
+	glColor4f( 1, 1, 0, 0.75f);
+/*
+	for(int i = 0; i<PARTICLE_COUNT; i++)
+	{
+		if((int)positionBuffer[i*4+3]==2)
+		{
+			glPushMatrix();
+			glTranslated( (positionBuffer[i*4]-XMAX/2)*sc , (positionBuffer[i*4+1]-YMAX/2)*sc, (positionBuffer[i*4+2]-ZMAX/2)*sc );
+			glutWireSphere( 0.73*sc, 9, 9 );
+			glPopMatrix();
+		}
+	}
+/**/
 
 	glColor3f(1.0,0.0,1.0);
 	glPointSize(1.f);
@@ -274,7 +314,7 @@ GLvoid display(GLvoid)
 	int pId_in_sortedPos = particleIndexBuffer[pId*2+0];
 
 	int i,j;
-
+/*
 	for(i=0;i<PARTICLE_COUNT;i++)
 	{
 		pId_in_sortedPos = particleIndexBuffer[i*2+0];
@@ -286,7 +326,7 @@ GLvoid display(GLvoid)
 
 		}
 	}
-
+*/
 	/*
 	pId_in_sortedPos = particleIndexBuffer[pId*2+0];
 
@@ -335,9 +375,6 @@ GLvoid display(GLvoid)
 
      glEnd();
 	*/
-
-	
-
 	//glPopMatrix();
 	//printf("\ntime:%d",clock()-c);
 	//c = clock();
@@ -348,18 +385,52 @@ GLvoid display(GLvoid)
 
     //engine->Draw();
 
-	/**///glPopMatrix();
-
-    glutSwapBuffers();
-	//printf("\ntime:%d",clock()-c);
-
-	QueryPerformanceCounter(&t2); 
-	printf("graphics: \t\t%9.3f ms\n====================================\n",	(t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart);
+	glutSwapBuffers();
+#if defined(_WIN32) || defined (_WIN64)
+	QueryPerformanceCounter(&t2);
+	graphTime = (t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart;
+#elif defined(__linux__)
+	clock_gettime(CLOCK_MONOTONIC_RAW, &t2);
+	graphTime = (float)( t2.tv_sec - t1.tv_sec ) * 1000.f + (float)(t2.tv_nsec - t1.tv_nsec)/1000000.f;
+#endif
+	stopwatch_report("graphics: \t\t%9.3f ms\n====================================\n");
+	totalTime += elapsedTime + graphTime;
+	calculateFPS();
 }
- 
+//-------------------------------------------------------------------------
+// Calculates the frames per second
+//-------------------------------------------------------------------------
+/**/
+void calculateFPS()
+{
+    //  Increase frame count
+	frames_counter++;
+
+    //  Get the number of milliseconds since glutInit called
+    //  (or first call to glutGet(GLUT ELAPSED TIME)).
+    //currentTime = glutGet(GLUT_ELAPSED_TIME);
+
+    //  Calculate time passed
+    int timeInterval = totalTime - prevTime;
+
+    if(timeInterval > 1000)
+    {
+        //  calculate the number of frames per second
+		fps = frames_counter / (totalTime / 1000.0f);
+
+        //  Set time
+        prevTime = totalTime;
+
+        //  Reset frame count
+        frameCount = 0;
+		printf("FPS: \t\t%9.3f fps\n====================================\n",	fps );
+    }
+	
+}/**/
 GLvoid reshape(GLsizei width, GLsizei height)
 {
       engine->Resize(width, height);
+
 
 }
 
@@ -417,11 +488,12 @@ void respond_mouse(int button, int state, int x, int y)
 //    called on mouse movement
 void mouse_motion (int x, int y) 
 {
+
 	if(lbutton)
 	{
 		int rx,ry;
 
-		ry = (GLfloat)(y - old_y)/2;	//Изменение угола поворота
+		ry = (GLfloat)(y - old_y)/2;	//пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 		rx = (GLfloat)(x - old_x)/2;
 
 		old_x=x;
@@ -431,6 +503,7 @@ void mouse_motion (int x, int y)
 		{
 			rotX += rx;
 			glRotatef(rx, 0.0, 1.0, 0.0);          
+			//glRotatef(rx, 0.0, 1.0, 0.0);          
 			//ort1 = Vector3D::RotateVector1AroundVector2(ort1,Vector3D(0,1,0),rx);
 			//ort2 = Vector3D::RotateVector1AroundVector2(ort2,Vector3D(0,1,0),rx);
 			//ort3 = Vector3D::RotateVector1AroundVector2(ort3,Vector3D(0,1,0),rx);
@@ -438,23 +511,82 @@ void mouse_motion (int x, int y)
 		
 		if(ry)
 		{
+			//rotY += ry;
+			//glRotatef(ry, 1.0, 0.0, 0.0);          
 			//ort1 = Vector3D::RotateVector1AroundVector2(ort1,Vector3D(0,0,1),ry);
 			//ort2 = Vector3D::RotateVector1AroundVector2(ort2,Vector3D(0,0,1),ry);
 			//ort3 = Vector3D::RotateVector1AroundVector2(ort3,Vector3D(0,0,1),ry);
 		}
 	}
 }
+/* There can be only one idle() callback function. In an 
+   animation, this idle() function must update not only the 
+   main window but also all derived subwindows */ 
+void  
+idle (void) 
+{ 
+ 
+  glutSetWindow (winIdMain); 
+  glutPostRedisplay (); 
+  glutSetWindow (winIdSub); 
+  glutPostRedisplay (); 
+}; 
 
-
-
+void  
+drawString (char *s) 
+{ 
+  unsigned int i; 
+  for (i = 0; i < strlen (s); i++) 
+    glutBitmapCharacter (GLUT_BITMAP_HELVETICA_10, s[i]); 
+}; 
+void  
+drawStringBig (char *s) 
+{ 
+  unsigned int i; 
+  for (i = 0; i < strlen (s); i++) 
+    glutBitmapCharacter (GLUT_BITMAP_HELVETICA_18, s[i]); 
+}; 
+static char label[100];                            /* Storage for current string   */
+void  
+subDisplay () 
+{ 
+ 
+  /* Clear subwindow */ 
+  glutSetWindow (winIdSub); 
+  glClearColor(0.7f, 0.7f, 0.7f, 1.0f);
+  glClear (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); 
+ 
+  /* Write State Variables */ 
+  glColor3f (1.0F, 1.0F, 1.0F); 
+  sprintf (label, "Number Of Particle = %d ", PARTICLE_COUNT); 
+  glRasterPos2f (0.01F, 0.65F); 
+  drawStringBig (label); 
+ 
+  glColor3f (1.0F, 1.0F, 1.0F); 
+  sprintf (label, "FPS = %.2f ", fps); 
+  glRasterPos2f (0.01F, 0.20F); 
+  drawStringBig (label); 
+ 
+  glutSwapBuffers (); 
+}; 
+/* Callback function for reshaping the subwindow */ 
+void  
+subReshape (int w, int h) 
+{ 
+  glViewport (0, 0, w, h); 
+  glMatrixMode (GL_PROJECTION); 
+  glLoadIdentity (); 
+  gluOrtho2D (0.0F, 1.0F, 0.0F, 1.0F); 
+}; 
 void Timer(int value)
 {
-	sph_fluid_main_step();
+	simulation_step();
 
 	// Re-register for next callback
     glutTimerFunc(TIMER_INTERVAL*0, Timer, 0);
 	glutPostRedisplay();
-
+	//glutSetWindow (winIdSub); 
+	//glutPostRedisplay (); 
 }
 
 
@@ -465,10 +597,10 @@ int main(int argc, char** argv)
     glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB);
     glutInitWindowSize(800, 600);
     glutInitWindowPosition(100, 100);
-	glutCreateWindow("Palyanov Andrey for OpenWorm: OpenCL PCISPH fluid demo [2012]");
-	
+	winIdMain = glutCreateWindow("                                		                          Palyanov Andrey for OpenWorm: OpenCL PCISPH fluid demo [2012]");
+	glutIdleFunc (idle); 
     /*
-    glClearColor (0.3, 0.3, 0.3, 0.0); // цвет фона
+    glClearColor (0.3, 0.3, 0.3, 0.0); // пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ
     glEnable(GL_LIGHTING);
     glLightModelf(GL_LIGHT_MODEL_TWO_SIDE, GL_TRUE);
     glEnable(GL_NORMALIZE);
@@ -489,28 +621,28 @@ int main(int argc, char** argv)
 	engine = new Engine();
 	engine->Init();
 
-	sph_fluid_main_start();
+	simulation_start();
 	glutDisplayFunc(display);
 	glutReshapeFunc(reshape);
 	glutMouseFunc(respond_mouse);
 	glutMotionFunc(mouse_motion);	// The former handles movement while the mouse is clicked, 
 	//glutPassiveMotionFunc			// and the latter while no button is clicked
 
+	
+	winIdSub = glutCreateSubWindow (winIdMain, 5, 5, 800 - 10, 600 / 10); 
+	glutDisplayFunc (subDisplay); 
+	glutReshapeFunc (subReshape); 
 	glutTimerFunc(TIMER_INTERVAL*0, Timer, 0);
-	
-
-	
-
 	/*
 	while(1)
 	{
-		sph_fluid_main_step();
+		simulation_step();
 	}
 	/**/
 
 	glutMainLoop();
 
-	sph_fluid_main_stop();
+	simulation_stop();
 
 	//exit(1);
 	return 0;

@@ -173,19 +173,19 @@
 			UniqueIdentifier="{4FC737F1-C7A5-4376-A066-2A32D752A2FF}"
 			>
 			<File
-				RelativePath=".\engine.cpp"
+				RelativePath=".\src\engine.cpp"
 				>
 			</File>
 			<File
-				RelativePath=".\graphics.cpp"
+				RelativePath=".\src\graphics.cpp"
 				>
 			</File>
 			<File
-				RelativePath=".\sph.cpp"
+				RelativePath=".\src\sph.cpp"
 				>
 			</File>
 			<File
-				RelativePath=".\sphFluidDemo.cl"
+				RelativePath=".\src\sphFluidDemo.cl"
 				>
 				<FileConfiguration
 					Name="Debug|Win32"
@@ -202,19 +202,19 @@
 			UniqueIdentifier="{93995380-89BD-4b04-88EB-625FBE52EBFB}"
 			>
 			<File
-				RelativePath=".\api.h"
+				RelativePath=".\src\api.h"
 				>
 			</File>
 			<File
-				RelativePath=".\engine.h"
+				RelativePath=".\src\engine.h"
 				>
 			</File>
 			<File
-				RelativePath=".\sph.h"
+				RelativePath=".\src\sph.h"
 				>
 			</File>
 			<File
-				RelativePath=".\VectorMath.h"
+				RelativePath=".\src\VectorMath.h"
 				>
 			</File>
 		</Filter>

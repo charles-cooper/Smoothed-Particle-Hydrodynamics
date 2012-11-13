@@ -1,0 +1,18 @@
+#AUTHOR Sergey Khayrulin
+#email s.khayrulin@gmail.com
+#TESTED ON
+#Linux 3.2.0-32-generic #51-Ubuntu SMP Wed Sep 26 21:33:09   
+#UTC 2012 x86_64 x86_64 x86_64 GNU/Linux
+
+SPH RUN GUID
+1) Install OpenGL library 
+	sudo apt-get install freeglut3 freeglut3-dev
+	sudo apt-get install binutils-gold
+2) Istall OpenCL library for your devices, you can find it in site of vendor of your device, this version works fine on Intel processors, on another devices we steel need to test it.
+
+you chould run g++ with this library - OpenCL, rt, glut, GL, GLU
+
+
+//You can use this Link 
+http://develnoter.blogspot.ru/2012/05/installing-opencl-in-ubuntu-1204.html
+http://mhr3.blogspot.ru/2011/05/opencl-on-ubuntu.html
