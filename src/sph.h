@@ -1,7 +1,7 @@
 #ifndef __SPH__
 #define __SPH__
 
-#define PARTICLE_COUNT ( 1024*72/*16*/ )
+#define PARTICLE_COUNT ( 1024*48/*16*/ )
 #define NEIGHBOR_COUNT 32
 
 

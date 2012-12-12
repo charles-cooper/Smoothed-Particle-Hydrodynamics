@@ -34,7 +34,7 @@
 #define SELECT( A, B, C ) C ? B : A
 #endif
 
-//#pragma OPENCL EXTENSION cl_amd_printf : enable
+#pragma OPENCL EXTENSION cl_intel_printf : enable
 
 __kernel void clearBuffers(
 						   __global float2 * neighborMap
@@ -1271,19 +1271,19 @@ void calculateBoundaryParticleAffect(
 	float4 dist;
 	float val,x_ib_norma;
 	int jd;
-	float8 returnedValue;
+	//float8 returnedValue;
 	do// gather density contribution from all neighbors (if they exist)
 	{
 		if( (jd = NEIGHBOR_MAP_ID( neighborMap[ idx + nc ])) != NO_PARTICLE_ID )
 		{
-			jd = particleIndexBack[jd];
+			//jd = particleIndexBack[jd];
 			id_source_particle = PI_SERIAL_ID( particleIndex[jd] );
 			if((int)position[id_source_particle].w == 3){
 				//dist = pos_ - position[id_source_particle];
 				x_ib_norma = ((*pos_).x - position[id_source_particle].x) * ((*pos_).x - position[id_source_particle].x);
 				x_ib_norma += ((*pos_).y - position[id_source_particle].y) * ((*pos_).y - position[id_source_particle].y);
 				x_ib_norma += ((*pos_).z - position[id_source_particle].z) * ((*pos_).z - position[id_source_particle].z);
-				x_ib_norma = sqrt(x_ib_norma);
+				x_ib_norma = SQRT(x_ib_norma);
 				w_icb_current = w_icb(r0,x_ib_norma);
 				n_b = velocity[id_source_particle];
 				n_ci += n_b * w_icb_current;
@@ -1301,15 +1301,16 @@ void calculateBoundaryParticleAffect(
 		(*pos_).y += dist.y;
 		(*pos_).z += dist.z;
 		if(tangVel){
+			float eps = 0.99f;//eps <= 1.0
 			float vel_n_len = n_ci.x * (*vel).x + n_ci.y * (*vel).y + n_ci.z * (*vel).z; 
 			if(vel_n_len < 0){
 				(*vel).x -= n_ci.x * vel_n_len;
 				(*vel).y -= n_ci.y * vel_n_len;
 				(*vel).z -= n_ci.z * vel_n_len;
+				(*vel) = (*vel) * eps;
 			}
 		}
 	}
-	//return dist;
 }
 //
 __kernel void pcisph_predictPositions(
@@ -1433,13 +1434,17 @@ __kernel void pcisph_correctPressure(
 									 __global float * pressure,
 									 __global float * rho,
 									 __global float * rhoInv,
-									 float delta
+									 float delta,
+									 __global float4 * position,
+									 __global uint2 * particleIndex
 									 )
 {
 	
 	int id = get_global_id( 0 );
 	id = particleIndexBack[id];//track selected particle (indices are not shuffled anymore)
-
+	/*int id_source_particle = PI_SERIAL_ID( particleIndex[id] );
+	if((int)(position[ id_source_particle ].w) == 3)
+		return;*/
 	int idx = id * NEIGHBOR_COUNT;
 	int nc = 0;// neigbor counter
 	float rho_err;
@@ -1473,12 +1478,16 @@ __kernel void pcisph_computePressureForceAcceleration(
 								  float mu,
 								  float simulationScale,
 								  __global float4 * acceleration,
-								  float rho0
+								  float rho0,
+								  __global float4 * position,
+								  __global uint2 * particleIndex
 								  )
 {
 	int id = get_global_id( 0 );
 	id = particleIndexBack[id];//track selected particle (indices are not mixed anymore)
-
+	int id_source_particle = PI_SERIAL_ID( particleIndex[id] );
+	if((int)(position[ id_source_particle ].w) == 3)
+		return;
 	int idx = id * NEIGHBOR_COUNT;
 	float hScaled = h * simulationScale;
 
@@ -1568,6 +1577,8 @@ __kernel void pcisph_integrate(
 	int id_source_particle = PI_SERIAL_ID( particleIndex[id] );
 	if((int)(position[ id_source_particle ].w) == 3)
 		return;
+	float4  accelOld = acceleration[ id ];
+	float4  accelT = acceleration[ PARTICLE_COUNT+id ];
 	float4 acceleration_ = acceleration[ id ] + acceleration[ PARTICLE_COUNT+id ]; acceleration_.w = 0.f;
 	float4 position_ = sortedPosition[ id ];
 	float4 velocity_ = sortedVelocity[ id ];
@@ -1579,7 +1590,14 @@ __kernel void pcisph_integrate(
 	// Semi-implicit Euler integration 
 	//float nV_length;
 	//float vel_limit = 100.f;
-	float4 newVelocity_ = velocity_ + timeStep * acceleration_; //newVelocity_.w = 0.f;
+	float4 newVelocity_ = velocity_ + timeStep * acceleration_  ; //newVelocity_.w = 0.f;
+	/*if((int)(position[ id_source_particle ].w) == 1){
+		/*printf("\tvelocity_.x : %f\n", newVelocity_.x);
+		printf("\tvelocity_.y : %f\n", newVelocity_.y);
+		printf("\tvelocity_.z : %f\n", newVelocity_.z);*/
+	//	printf("id : %d", get_global_id( 0 ));
+	//}
+		
 	//newVelocity_[3] = 0;
 	//nV_length = SQRT(DOT(newVelocity_,newVelocity_));
 	//if(nV_length>vel_limit)
@@ -1614,8 +1632,9 @@ __kernel void pcisph_integrate(
 	// better replace 0.0000001 with smoothingRadius*0.001 or smth like this to keep this
 
 	float particleType = position[ id_source_particle ].w;
+	newVelocity_ = (velocity_ + newVelocity_) * 0.5f ;
 	calculateBoundaryParticleAffect(id,r0,neighborMap,particleIndexBack,particleIndex,position,velocity,&newPosition_, true, &newVelocity_);
-	velocity[ id_source_particle ] = (newVelocity_)*0.5f;//newVelocity_;
+	velocity[ id_source_particle ] = newVelocity_;//newVelocity_;
 	position[ id_source_particle ] = newPosition_;
 	position[ id_source_particle ].w = particleType;
 	// position[0..2] stores x,y,z; position[3] - for particle type

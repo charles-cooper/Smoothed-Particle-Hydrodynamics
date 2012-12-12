@@ -60,7 +60,7 @@ const float mass = 0.0003f;//0.0003
 const float simulationScale = 0.004f;
 const float simulationScaleInv = 1.0f / simulationScale;
 const float mu = 10.0f;//why this value? Dynamic viscosity of water at 25 C = 0.89e-3 Pa*s
-const float timeStep = 0.0008f;//0.0005f;//0.0042f;
+const float timeStep = 0.002f;//0.0005f;//0.0042f;
 const float CFLLimit = 100.0f;
 const int NK = NEIGHBOR_COUNT * PARTICLE_COUNT;
 const float damping = 0.75f;
@@ -258,6 +258,8 @@ _run_pcisph_computePressureForceAcceleration( cl::CommandQueue queue ){
 	pcisph_computePressureForceAcceleration.setArg( 13, simulationScale );
 	pcisph_computePressureForceAcceleration.setArg( 14, acceleration );
 	pcisph_computePressureForceAcceleration.setArg( 15, rho0 );
+	pcisph_computePressureForceAcceleration.setArg( 16, position );
+	pcisph_computePressureForceAcceleration.setArg( 17, particleIndex );
 	queue.enqueueNDRangeKernel(
 		pcisph_computePressureForceAcceleration, cl::NullRange, cl::NDRange( (int) ( PARTICLE_COUNT ) ),
 #if defined( __APPLE__ )
@@ -738,6 +740,8 @@ _run_pcisph_correctPressure( cl::CommandQueue queue ){
 	pcisph_correctPressure.setArg(11, rho );
 	pcisph_correctPressure.setArg(12, rhoInv );
 	pcisph_correctPressure.setArg(13, delta );
+	pcisph_correctPressure.setArg(14, position );
+	pcisph_correctPressure.setArg(15, particleIndex );
 	queue.enqueueNDRangeKernel(
 		pcisph_correctPressure, cl::NullRange, cl::NDRange( (int) ( PARTICLE_COUNT ) ),
 #if defined( __APPLE__ )
@@ -839,7 +843,7 @@ void writeLog_positions()
 {
 	int err;
 
-	err = queue.enqueueReadBuffer( sortedPosition, CL_TRUE, 0, PARTICLE_COUNT * sizeof( float ) * 8, positionBuffer );
+	err = queue.enqueueReadBuffer( position, CL_TRUE, 0, PARTICLE_COUNT * sizeof( float ) * 4, positionBuffer );
 	if( err != CL_SUCCESS ){
 		throw std::runtime_error( "could not enqueue read" );
 	}
@@ -1101,13 +1105,15 @@ void prepareElasticMatterData()
 	}
 
 	int err;
+	if(ELASTIC_CONNECTIONS_COUNT != 0){
 	
-	elasticConnectionsData = cl::Buffer( context, CL_MEM_READ_WRITE, ( ELASTIC_CONNECTIONS_COUNT * sizeof( float ) * 4 ), NULL, &err );
-	if( err != CL_SUCCESS ){ throw std::runtime_error( "buffer elasticConnectionsData creation failed" ); }
+		elasticConnectionsData = cl::Buffer( context, CL_MEM_READ_WRITE, ( ELASTIC_CONNECTIONS_COUNT * sizeof( float ) * 4 ), NULL, &err );
+		if( err != CL_SUCCESS ){ throw std::runtime_error( "buffer elasticConnectionsData creation failed" ); }
 	
 
-	err = queue.enqueueWriteBuffer( elasticConnectionsData, CL_TRUE, 0, ELASTIC_CONNECTIONS_COUNT * sizeof( float ) * 4, elasticConnectionsDataBuffer );
-	if( err != CL_SUCCESS ){ throw std::runtime_error( "could not enqueue elasticConnectionsData write" ); }
+		err = queue.enqueueWriteBuffer( elasticConnectionsData, CL_TRUE, 0, ELASTIC_CONNECTIONS_COUNT * sizeof( float ) * 4, elasticConnectionsDataBuffer );
+		if( err != CL_SUCCESS ){ throw std::runtime_error( "could not enqueue elasticConnectionsData write" ); }
+	}
 	
 
 	return;
@@ -1266,7 +1272,9 @@ void step(int nIter)
 	err = queue.enqueueReadBuffer( position, CL_TRUE, 0, PARTICLE_COUNT * sizeof( float ) * 4, positionBuffer );
 	if( err != CL_SUCCESS ){ throw std::runtime_error( "could not enqueue position read" ); } queue.finish();
 	//printf("_[1]\n");
-
+	if(nIter == 100){
+		writeLog_positions();
+	}
 	err = queue.enqueueReadBuffer( rho, CL_TRUE, 0, PARTICLE_COUNT * sizeof( float ) * 1, densityBuffer );
 	if( err != CL_SUCCESS ){ throw std::runtime_error( "could not enqueue read" ); } queue.finish();
 
@@ -1353,7 +1361,7 @@ void initializeOpenCL(
 */
 
 	//0-CPU, 1-GPU// depends on order appropriet drivers was instaled
-	int plList=0;//selected platform index in platformList array
+	int plList=1;//selected platform index in platformList array
 
 	cl_context_properties cprops[3] = { CL_CONTEXT_PLATFORM, (cl_context_properties) (platformList[plList])(), 0 };
 
@@ -1399,7 +1407,7 @@ void initializeOpenCL(
 /*work*/  //	err = program.build( devices, "-g -s \"E:\\Distrib\\_OpenWorm related soft\\PCISPH+elastic\\src\\sphFluidDemo.cl\"" );
 /*homeS*/ // err = program.build( devices,"-g -s \"C:\\Users\\Sergey\\Desktop\\SphFluid_CLGL_myNeighborhoodSearch_12may2012\\sphFluidDemo.cl\"" );
 /*homeA*/  //  err = program.build( devices, "-g -s \"D:\\_OpenWorm\\SphFluid_CLGL_original_32nearest_PCI+elastic\\src\\sphFluidDemo.cl\"" );
-/*workS*/ // 	err = program.build( devices, "-g -s \"D:\\Docs\\Google Drive\\My Collection\\PCISPH+ELASTIC MATTER\\WormBody_Integration\\sphFluidDemo.cl\"" );			 			 
+/*workS*///  	err = program.build( devices, "-g -s \"C:\\Users\\Serg\\Documents\\GitHub\\Smoothed-Particle-Hydrodynamics\\src\\sphFluidDemo.cl\"" );			 			 
 	//D:\_OpenWorm\SphFluid_CLGL_original_32nearest_PCI
 /*#else*/
 	//err = program.build( devices, "-g" );
@@ -1889,7 +1897,7 @@ int simulation_start ( /*int argc, char **argv*/ )
 
 		coeff = 0.2325f; // for particle mass = 0.0003
 		x = XMAX*4.0f/8.f+h*coeff;
-		y = YMAX*2.0f/9.f+h*coeff; // 45*h*coeff;
+		y = YMAX*2.0f/4.f+h*coeff; // 45*h*coeff;
 		z = ZMAX*4.0f/8.f+h*coeff;
 
 		int segmentsCount = 50;
@@ -1910,11 +1918,12 @@ int simulation_start ( /*int argc, char **argv*/ )
 		int pCount = i;//particle counter
 
 		// outer elastic cylinder generation
-
+		
+		//pCount++;
 
 		//makeworm
 
-		
+		/*
 		for( j = -45; j <= 45; ++j)
 		{
 			segmentsCount = (int)sqrt((float)(40*40-j*j*1*1));
@@ -1938,7 +1947,7 @@ int simulation_start ( /*int argc, char **argv*/ )
 					positionVector[ 2 ] = z + pdist_coeff*h*coeff*(float)j ;
 					positionVector[ 3 ] = 2.1;// 2 = elastic matter
 
-					if(cylinderLayers>/**/9/**/) positionVector[ 3 ] = 1.1;// 1 = liquid
+					if(cylinderLayers>9) positionVector[ 3 ] = 1.1;// 1 = liquid
 
 					velocityVector[ 0 ] = 0;
 					velocityVector[ 1 ] = 0;
@@ -1999,11 +2008,13 @@ int simulation_start ( /*int argc, char **argv*/ )
 		/**/
 
 		// bottom layer of water
-
+/*
 		x = 0*XMAX/4+h*coeff;
 		y = h*coeff + r0;
-		z = h*coeff;
-
+		z = h*coeff;*/
+		x = r0 * 5 + 0*XMAX/4+h*coeff;
+		y = r0 * 10 + h*coeff;
+		z = r0 * 5 + h*coeff;
 		for( ; pCount < PARTICLE_COUNT; ++pCount )
 		{
 			float * positionVector = positionBuffer + 4 * pCount;
@@ -2020,8 +2031,8 @@ int simulation_start ( /*int argc, char **argv*/ )
 
 			x+= 2*h*coeff;
 
-			if(x>XMAX) { x = h*coeff; z += 2*h*coeff; }
-			if(z>ZMAX) { x = h*coeff; z = h*coeff; y += 2*h*coeff; }
+			if(x>XMAX/2) { x = r0 * 5 + h*coeff; z += 2*h*coeff; }
+			if(z>ZMAX/2) { x = r0 * 5 + h*coeff; z = r0 * 5 + h*coeff; y += 2*h*coeff; }
 		}
 		
 
