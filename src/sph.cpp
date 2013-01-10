@@ -78,6 +78,8 @@ const float gravity_x = 0.0f;
 const float gravity_y = -9.8f;
 const float gravity_z = 0.0f;
 
+int run;
+int nIter=0;
 float calcDelta()
 {
     float x[] = { 1, 1, 0,-1,-1,-1, 0, 1, 1, 1, 0,-1,-1,-1, 0, 1, 1, 1, 0,-1,-1,-1, 0, 1, 2,-2, 0, 0, 0, 0, 0, 0 };
@@ -391,7 +393,7 @@ _runHashParticles( cl::CommandQueue queue ){
 }
 
 unsigned int
-_runIndexPostPass( ){
+_runIndexPostPass( cl::CommandQueue queue ){
 	// Stage IndexPostPass
 
 	//28aug_Palyanov_start_block
@@ -767,8 +769,16 @@ void writeLog_density()
 		throw std::runtime_error( "could not enqueue read" );
 	}
 	queue.finish();
-
-	FILE* flog = fopen("density.txt","wt");
+	FILE* flog;
+	char fileName[100];
+	if(run == 1){
+		sprintf(fileName,"runs/density_run1_iter%d.txt",nIter);
+		flog = fopen(fileName,"wt");
+	}
+	else{
+		sprintf(fileName,"runs/density_run2_iter%d.txt",nIter);
+		flog = fopen(fileName,"wt");
+	}
 	for(int i=0;i<PARTICLE_COUNT;i++)
 	{
 		fprintf(flog,"%e\t",(float)positionBuffer[i]);
@@ -790,15 +800,25 @@ void writeLog_neighbor_count()
 
 	float value = 0.f;
 
-	FILE* flog = fopen("neighbor_count.txt","a+");
+	FILE* flog;
+	char fileName[100];
+	if(run == 1){
+		sprintf(fileName,"runs/neighbor_count_run1_iter%d.txt",nIter);
+		flog = fopen(fileName,"wt");
+	}
+	else{
+		sprintf(fileName,"runs/neighbor_count_run2_iter%d.txt",nIter);
+		flog = fopen(fileName,"wt");
+	}
 	for(int i=0;i<PARTICLE_COUNT;i++)
 	{
-		value += (float)positionBuffer[i];
+		value = (float)positionBuffer[i];
+		fprintf(flog,"%e\t",value);
 	}
 
-	value /= (float)PARTICLE_COUNT;
+	//value /= (float)PARTICLE_COUNT;
 
-	fprintf(flog,"%e\n",value);
+	fprintf(flog,"\n");
 	fclose(flog);
 
 }
@@ -848,8 +868,16 @@ void writeLog_positions()
 		throw std::runtime_error( "could not enqueue read" );
 	}
 	queue.finish();
-
-	FILE* flog = fopen("positions.txt","wt");
+	FILE* flog;
+	char fileName[100];
+	if(run == 1){
+		sprintf(fileName,"runs/positions_run1_iter%d.txt",nIter);
+		flog = fopen(fileName,"wt");
+	}
+	else{
+		sprintf(fileName,"runs/positions_run2_iter%d.txt",nIter);
+		flog = fopen(fileName,"wt");
+	}
 	for(int i=0;i<PARTICLE_COUNT;i++)
 	{
 		fprintf(flog,"%e\t",(float)positionBuffer[PARTICLE_COUNT*4*0+i*4]);
@@ -869,7 +897,65 @@ void writeLog_positions()
 	fclose(flog);
 
 }
+void writeLog_velocity()
+{
+	int err;
 
+	err = queue.enqueueReadBuffer( velocity, CL_TRUE, 0, PARTICLE_COUNT * sizeof( float ) * 4, velocityBuffer );
+	if( err != CL_SUCCESS ){
+		throw std::runtime_error( "could not enqueue read" );
+	}
+	queue.finish();
+
+	FILE* flog;
+	char fileName[100];
+	if(run == 1){
+		sprintf(fileName,"runs/velocity_run1_iter%d.txt",nIter);
+		flog = fopen(fileName,"wt");
+	}
+	else{
+		sprintf(fileName,"runs/velocity_run2_iter%d.txt",nIter);
+		flog = fopen(fileName,"wt");
+	}
+	for(int i=0;i<PARTICLE_COUNT;i++)
+	{
+		fprintf(flog,"%e\t",(float)velocityBuffer[PARTICLE_COUNT*4*0+i*4]);
+	}
+	fprintf(flog,"\n");
+	for(int i=0;i<PARTICLE_COUNT;i++)
+	{
+		fprintf(flog,"%e\t",(float)velocityBuffer[PARTICLE_COUNT*4*0+i*4+1]);
+	}
+	fprintf(flog,"\n");
+	for(int i=0;i<PARTICLE_COUNT;i++)
+	{
+		fprintf(flog,"%e\t",(float)velocityBuffer[PARTICLE_COUNT*4*0+i*4+2]);
+	}
+	fprintf(flog,"\n");
+
+	fclose(flog);
+
+}
+void writeLog_pVel(){
+	int err;
+	err = queue.enqueueReadBuffer( position, CL_TRUE, 0, PARTICLE_COUNT * sizeof( float ) * 4, positionBuffer );
+	//err = queue.enqueueReadBuffer( velocity, CL_TRUE, 0, PARTICLE_COUNT * sizeof( float ) * 4, velocityBuffer );
+	if( err != CL_SUCCESS ){
+		throw std::runtime_error( "could not enqueue read" );
+	}
+	queue.finish();
+
+	FILE* flog;
+	if(nIter != 1)
+		flog = fopen("pVel.txt","a");
+	else
+		flog = fopen("pVel.txt","wt");
+	int i = 32835;
+	float modOfVel = sqrt(positionBuffer[i*4]*positionBuffer[i*4] + positionBuffer[i*4+1]*positionBuffer[i*4+1] + positionBuffer[i*4+2]*positionBuffer[i*4+2]);
+	fprintf(flog,"%f\n", modOfVel);
+	
+	fclose(flog);
+}
 void writeLog_positions_pred()
 {
 	int err;
@@ -880,7 +966,16 @@ void writeLog_positions_pred()
 	}
 	queue.finish();
 
-	FILE* flog = fopen("positions.txt","wt");
+	FILE* flog;
+	char fileName[100];
+	if(run == 1){
+		sprintf(fileName,"runs/positionPred_run1_iter%d.txt",nIter);
+		flog = fopen(fileName,"wt");
+	}
+	else{
+		sprintf(fileName,"runs/positionPred_run2_iter%d.txt",nIter);
+		flog = fopen(fileName,"wt");
+	}
 	for(int i=0;i<PARTICLE_COUNT;i++)
 	{
 		fprintf(flog,"%e\t",(float)positionBuffer[PARTICLE_COUNT*4+i*4]);
@@ -974,7 +1069,16 @@ void writeLog_pressure()
 	}
 	queue.finish();
 
-	FILE* flog = fopen("pressure.txt","wt");
+	FILE* flog;
+	char fileName[100];
+	if(run == 1){
+		sprintf(fileName,"runs/pressure_run1_iter%d.txt",nIter);
+		flog = fopen(fileName,"wt");
+	}
+	else{
+		sprintf(fileName,"runs/pressure_run2_iter%d.txt",nIter);
+		flog = fopen(fileName,"wt");
+	}
 	for(int i=0;i<PARTICLE_COUNT;i++)
 	{
 		fprintf(flog,"%e\t",(float)positionBuffer[i]);
@@ -1113,6 +1217,7 @@ void prepareElasticMatterData()
 
 		err = queue.enqueueWriteBuffer( elasticConnectionsData, CL_TRUE, 0, ELASTIC_CONNECTIONS_COUNT * sizeof( float ) * 4, elasticConnectionsDataBuffer );
 		if( err != CL_SUCCESS ){ throw std::runtime_error( "could not enqueue elasticConnectionsData write" ); }
+		queue.finish();
 	}
 	
 
@@ -1150,7 +1255,8 @@ double stopwatch_report(const char *str){
 	return (float)(t2.tv_sec - t0.tv_sec) * 1000.f + (float)(t2.tv_nsec - t0.tv_nsec)/1000000.f;
 #endif
 }
-void step(int nIter)
+
+void step(/*int nIter*/)
 {
 	int err;
 	float rho_err;
@@ -1165,6 +1271,7 @@ void step(int nIter)
 	printf("\n");
 
 	/* THIS IS COMMON PART FOR BOTH SPH AND PCISPH*/
+	queue.finish();
 
 	_runClearBuffers( queue ); queue.finish();			 stopwatch_report("_runClearBuffers: \t%9.3f ms\n");
 
@@ -1177,7 +1284,7 @@ void step(int nIter)
 	_runIndexx( queue ); queue.finish();				 stopwatch_report("_runIndexx: \t\t%9.3f ms\n");
 
 	// this is completely new _runIndexPostPass, very fast, which replaced the previous one (slow, non-optimal) | single CPU thread
-	_runIndexPostPass( ); /*queue.finish();*/	 stopwatch_report("_runIndexPostPass: \t%9.3f ms\n");
+	_runIndexPostPass( queue ); /*queue.finish();*/	 stopwatch_report("_runIndexPostPass: \t%9.3f ms\n");
 
 	_runFindNeighbors( queue); queue.finish();	 stopwatch_report("_runFindNeighbors: \t%9.3f ms\n");
 
@@ -1255,7 +1362,11 @@ void step(int nIter)
 
 		// for all particles: compute new velocity v(t+1)
 		// for all particles: compute new position x(t+1)
-		_run_pcisph_integrate( queue ); queue.finish();	//writeLog_positions();
+		queue.finish();
+
+		_run_pcisph_integrate( queue ); 
+		
+		queue.finish();	//writeLog_positions();
 
 		stopwatch_report("_runPCISPH: \t\t%9.3f ms\t3 iteration(s)\n");
 	}
@@ -1272,9 +1383,16 @@ void step(int nIter)
 	err = queue.enqueueReadBuffer( position, CL_TRUE, 0, PARTICLE_COUNT * sizeof( float ) * 4, positionBuffer );
 	if( err != CL_SUCCESS ){ throw std::runtime_error( "could not enqueue position read" ); } queue.finish();
 	//printf("_[1]\n");
-	if(nIter == 100){
+	//run = 2;
+	//writeLog_pVel();
+	/*if(nIter >= 0 && nIter <= 20){
+		writeLog_density();
 		writeLog_positions();
-	}
+		//writeLog_pressure();
+		//writeLog_velocity();
+		writeLog_neighbor_count();
+		writeLog_positions_pred();
+	}*/
 	err = queue.enqueueReadBuffer( rho, CL_TRUE, 0, PARTICLE_COUNT * sizeof( float ) * 1, densityBuffer );
 	if( err != CL_SUCCESS ){ throw std::runtime_error( "could not enqueue read" ); } queue.finish();
 
@@ -1386,7 +1504,7 @@ void initializeOpenCL(
 	result = devices[0].getInfo(CL_DEVICE_GLOBAL_MEM_CACHE_SIZE,&value);
 	if(result == CL_SUCCESS) printf("CL_PLATFORM_VERSION [%d]: CL_DEVICE_GLOBAL_MEM_CACHE_SIZE [%d]: \t%d\n",plList, 0, value);
 	///////////////////AP2012////////////////
-
+	
 	queue = cl::CommandQueue( context, devices[ 0 ], 0, &err );
 	if( err != CL_SUCCESS ){
 		throw std::runtime_error( "failed to create command queue" );
@@ -2013,7 +2131,7 @@ int simulation_start ( /*int argc, char **argv*/ )
 		y = h*coeff + r0;
 		z = h*coeff;*/
 		x = r0 * 5 + 0*XMAX/4+h*coeff;
-		y = r0 * 10 + h*coeff;
+		y = r0 * 15 + h*coeff;
 		z = r0 * 5 + h*coeff;
 		for( ; pCount < PARTICLE_COUNT; ++pCount )
 		{
@@ -2073,7 +2191,7 @@ int simulation_start ( /*int argc, char **argv*/ )
 	return err;//AP2012
 }
 
-int nIter=0;
+
 
 extern int frames_counter;
 
@@ -2082,7 +2200,7 @@ void simulation_step ()
 	nIter++;
 	printf("\n[[ Step %d ]]",nIter);
 	//printf("\n[[ Step %d ]], OpenGL_frames: %d",nIter,frames_counter);
-	step(nIter);
+	step(/*nIter*/);
 	//printf("\nsimulation_step:%d\n",clock() - c);
 }
 

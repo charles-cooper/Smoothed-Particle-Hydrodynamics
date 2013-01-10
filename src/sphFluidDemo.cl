@@ -515,7 +515,7 @@ int4 cellFactors(
 				 float hashGridCellSizeInv
 				 )
 {
-	//xmin, ymin, zmin ����� �� ��������������
+	//xmin, ymin, zmin 
 	int4 result;
 	result.x = (int)( position.x *  hashGridCellSizeInv );
 	result.y = (int)( position.y *  hashGridCellSizeInv );
@@ -1097,7 +1097,7 @@ __kernel void pcisph_computeForcesAndInitPressure(
 {
 	int id = get_global_id( 0 );
 	id = particleIndexBack[id];//track selected particle (indices are not shuffled anymore)
-
+	
 	int idx = id * NEIGHBOR_COUNT;
 	float hScaled = h * simulationScale;
 	float hScaled2 = hScaled*hScaled;//29aug_A.Palyanov
@@ -1391,6 +1391,7 @@ __kernel void pcisph_predictDensity(
 	float hScaled6 = hScaled2*hScaled2*hScaled2;
 	//float2 nm;
 	int jd;
+	int real_nc = 0;
 
 	do// gather density contribution from all neighbors (if they exist)
 	{
@@ -1402,6 +1403,7 @@ __kernel void pcisph_predictDensity(
 			if(r_ij2<hScaled2)
 			{
 				density += (hScaled2-r_ij2)*(hScaled2-r_ij2)*(hScaled2-r_ij2);
+				real_nc++;
 			}
 		}
 
@@ -1417,6 +1419,7 @@ __kernel void pcisph_predictDensity(
 
 	density *= mass*Wpoly6Coefficient; // since all particles are same fluid type, factor this out to here
 	rho[ PARTICLE_COUNT+id ] = density; 
+	rhoInv[ id ] = real_nc; 	
 }
 
 
@@ -1591,12 +1594,9 @@ __kernel void pcisph_integrate(
 	//float nV_length;
 	//float vel_limit = 100.f;
 	float4 newVelocity_ = velocity_ + timeStep * acceleration_  ; //newVelocity_.w = 0.f;
-	/*if((int)(position[ id_source_particle ].w) == 1){
-		/*printf("\tvelocity_.x : %f\n", newVelocity_.x);
-		printf("\tvelocity_.y : %f\n", newVelocity_.y);
-		printf("\tvelocity_.z : %f\n", newVelocity_.z);*/
-	//	printf("id : %d", get_global_id( 0 ));
-	//}
+	if(id_source_particle == 32835){
+		//printf("velocity:%f\n",sqrt(DOT(newVelocity_,newVelocity_)));	
+	}
 		
 	//newVelocity_[3] = 0;
 	//nV_length = SQRT(DOT(newVelocity_,newVelocity_));
@@ -1632,7 +1632,7 @@ __kernel void pcisph_integrate(
 	// better replace 0.0000001 with smoothingRadius*0.001 or smth like this to keep this
 
 	float particleType = position[ id_source_particle ].w;
-	newVelocity_ = (velocity_ + newVelocity_) * 0.5f ;
+	//newVelocity_ = (velocity_ + newVelocity_) * 0.5f ;
 	calculateBoundaryParticleAffect(id,r0,neighborMap,particleIndexBack,particleIndex,position,velocity,&newPosition_, true, &newVelocity_);
 	velocity[ id_source_particle ] = newVelocity_;//newVelocity_;
 	position[ id_source_particle ] = newPosition_;
