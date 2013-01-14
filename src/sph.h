@@ -1,7 +1,7 @@
 #ifndef __SPH__
 #define __SPH__
 
-#define PARTICLE_COUNT ( 1024*42/*16*/ )
+#define PARTICLE_COUNT ( 1024*16/*16*/ )
 #define NEIGHBOR_COUNT 32
 
 
@@ -13,11 +13,11 @@
 #endif
 
 #define XMIN 0
-#define XMAX 120.24//120//200//50//100
+#define XMAX 80.16//120.24//120//200//50//100
 #define YMIN 0
 #define YMAX 80.16//80//330//40//80
 #define ZMIN 0
-#define ZMAX 180.36//180//10//30
+#define ZMAX 45.09//180//10//30
 
 //================================== for internal use ============
 

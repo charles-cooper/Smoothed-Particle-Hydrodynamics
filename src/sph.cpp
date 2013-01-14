@@ -80,6 +80,9 @@ const float gravity_z = 0.0f;
 
 int run;
 int nIter=0;
+int numOfBParticle = 0;
+int numOfLParticle = 0;
+int numOfEParticle = 0;
 float calcDelta()
 {
     float x[] = { 1, 1, 0,-1,-1,-1, 0, 1, 1, 1, 0,-1,-1,-1, 0, 1, 1, 1, 0,-1,-1,-1, 0, 1, 2,-2, 0, 0, 0, 0, 0, 0 };
@@ -2034,7 +2037,7 @@ int simulation_start ( /*int argc, char **argv*/ )
 
 
 		int pCount = i;//particle counter
-
+		numOfBParticle = i;
 		// outer elastic cylinder generation
 		
 		//pCount++;
@@ -2130,8 +2133,9 @@ int simulation_start ( /*int argc, char **argv*/ )
 		x = 0*XMAX/4+h*coeff;
 		y = h*coeff + r0;
 		z = h*coeff;*/
+		numOfEParticle = pCount - numOfBParticle;
 		x = r0 * 5 + 0*XMAX/4+h*coeff;
-		y = r0 * 15 + h*coeff;
+		y = r0 * 5 + h*coeff;
 		z = r0 * 5 + h*coeff;
 		for( ; pCount < PARTICLE_COUNT; ++pCount )
 		{
@@ -2153,7 +2157,7 @@ int simulation_start ( /*int argc, char **argv*/ )
 			if(z>ZMAX/2) { x = r0 * 5 + h*coeff; z = r0 * 5 + h*coeff; y += 2*h*coeff; }
 		}
 		
-
+		numOfLParticle = pCount - numOfEParticle - numOfBParticle;
 		err = queue.enqueueWriteBuffer( position, CL_TRUE, 0, PARTICLE_COUNT * sizeof( float ) * 4, positionBuffer );
 		if( err != CL_SUCCESS ){
 			throw std::runtime_error( "could not enqueue position write" );

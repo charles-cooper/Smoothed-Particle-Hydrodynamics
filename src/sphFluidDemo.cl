@@ -1356,7 +1356,7 @@ __kernel void pcisph_predictPositions(
 	//	xmin, xmax, ymin, ymax, zmin, zmax, damping );
 
 	//sortedVelocity[id] = newVelocity_;// sorted position, as well as velocity, 
-	calculateBoundaryParticleAffect(id,r0,neighborMap,particleIndexBack,particleIndex,position,velocity,&newPosition_,false, &newVelocity_);
+	//calculateBoundaryParticleAffect(id,r0,neighborMap,particleIndexBack,particleIndex,position,velocity,&newPosition_,false, &newVelocity_);
 	sortedPosition[PARTICLE_COUNT+id] = newPosition_;// in current version sortedPosition array has double size, 
 													 // PARTICLE_COUNT*2, to store both x(t) and x*(t+1)
 }
@@ -1633,7 +1633,7 @@ __kernel void pcisph_integrate(
 
 	float particleType = position[ id_source_particle ].w;
 	//newVelocity_ = (velocity_ + newVelocity_) * 0.5f ;
-	calculateBoundaryParticleAffect(id,r0,neighborMap,particleIndexBack,particleIndex,position,velocity,&newPosition_, true, &newVelocity_);
+	//calculateBoundaryParticleAffect(id,r0,neighborMap,particleIndexBack,particleIndex,position,velocity,&newPosition_, true, &newVelocity_);
 	velocity[ id_source_particle ] = newVelocity_;//newVelocity_;
 	position[ id_source_particle ] = newPosition_;
 	position[ id_source_particle ].w = particleType;

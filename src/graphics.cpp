@@ -30,6 +30,9 @@ extern unsigned int * particleIndexBuffer;
 extern float * densityBuffer;
 extern float * velocityBuffer;
 extern double elapsedTime;
+extern int numOfEParticle;
+extern int numOfBParticle;
+extern int numOfLParticle;
 double graphTime;
 double totalTime = 0;
 int frames_counter = 0;
@@ -276,7 +279,7 @@ void display(void)
 		}
 		else{
 			
-			/*{
+			/**/{
 				glColor4f(  0,  1,  1, 1.0f);//blue
 				glBegin(GL_LINES);
 				  x =  positionBuffer[ i * 4 ] + velocityBuffer[i * 4];
@@ -285,7 +288,7 @@ void display(void)
 				  glVertex3f((positionBuffer[i*4]-XMAX/2)*sc , (positionBuffer[i*4+1]-YMAX/2)*sc, (positionBuffer[i*4+2]-ZMAX/2)*sc );
 				  glVertex3f((x-XMAX/2)*sc , (y-YMAX/2)*sc, (z-ZMAX/2)*sc );
 				glEnd();
-			}*/
+			}/**/
 		}
 		
 	}
@@ -430,8 +433,6 @@ void calculateFPS()
 GLvoid reshape(GLsizei width, GLsizei height)
 {
       engine->Resize(width, height);
-
-
 }
 
 void respond_mouse(int button, int state, int x, int y)
@@ -558,7 +559,7 @@ subDisplay ()
  
   /* Write State Variables */ 
   glColor3f (1.0F, 1.0F, 1.0F); 
-  sprintf (label, "Number Of Particle = %d ", PARTICLE_COUNT); 
+  sprintf (label, "Number Of Particle BOUNDARY + LIQUID + ELASTIC = %d + %d + %d = %d ", numOfBParticle,numOfLParticle,numOfEParticle,PARTICLE_COUNT); 
   glRasterPos2f (0.01F, 0.65F); 
   drawStringBig (label); 
  
