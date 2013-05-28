@@ -5,7 +5,7 @@
 // Eurographics/SIGGRAPH Symposium on Computer Animation (2003).
 //TODO: write all papers and dissertation what we use in work
 
-#include "src//owOpenCLConstant.h"
+#include "/media/files/Downloads/Smoothed-Particle-Hydrodynamics/src/owOpenCLConstant.h"
 
 #define POSITION_CELL_ID( i ) i.w
 
@@ -30,7 +30,7 @@
 #define SELECT( A, B, C ) C ? B : A
 #endif
 
-#pragma OPENCL EXTENSION cl_intel_printf : enable
+//#pragma OPENCL EXTENSION cl_intel_printf : enable
 
 __kernel void clearBuffers(
 						   __global float2 * neighborMap,
